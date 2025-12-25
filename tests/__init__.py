@@ -1,0 +1,1 @@
+"""Test suite for SwellSight Wave Analysis Model."""
