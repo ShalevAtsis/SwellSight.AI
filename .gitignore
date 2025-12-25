@@ -128,11 +128,15 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# Data directories
-data/
+# Data directories (but keep .gitkeep files)
+data/*
+!data/.gitkeep
+!data/*/.gitkeep
 datasets/
-checkpoints/
-logs/
+checkpoints/*
+!checkpoints/.gitkeep
+logs/*
+!logs/.gitkeep
 outputs/
 wandb/
 
