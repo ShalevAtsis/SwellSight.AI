@@ -9,6 +9,7 @@ from PIL import Image
 import logging
 from dataclasses import dataclass
 import random
+from datetime import datetime
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -143,7 +144,7 @@ class SyntheticDataGenerator:
                 'depth_meters': wave_params.depth_meters
             },
             'image_size': self.image_size,
-            'created_timestamp': str(np.datetime64('now'))
+            'created_timestamp': datetime.now().isoformat()
         }
         
         return sample_metadata

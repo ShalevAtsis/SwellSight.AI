@@ -10,6 +10,8 @@ from torchvision import transforms
 from PIL import Image
 import logging
 
+from .augmentation import WaveAugmentationPipeline, create_augmentation_pipeline
+
 # Set up logging
 logger = logging.getLogger(__name__)
 
@@ -113,6 +115,7 @@ class DatasetManager:
         self.rotation_range = self.config.get('rotation_range', 15.0)
         self.brightness_range = self.config.get('brightness_range', 0.2)
         self.contrast_range = self.config.get('contrast_range', 0.15)
+        self.gaussian_noise_std = self.config.get('gaussian_noise_std', 0.01)
         
         # Data loading parameters
         self.num_workers = self.config.get('num_workers', 4)
@@ -124,6 +127,9 @@ class DatasetManager:
         self.real_path = self.data_path / 'real'
         self.metadata_path = self.data_path / 'metadata'
         
+        # Initialize augmentation pipeline
+        self.augmentation_pipeline = create_augmentation_pipeline(self.config)
+        
         # Cached datasets
         self._train_dataset = None
         self._val_dataset = None
@@ -131,6 +137,7 @@ class DatasetManager:
         
         logger.info(f"Initialized DatasetManager with data path: {self.data_path}")
         logger.info(f"Train/Val split: {self.train_split:.1%}/{self.val_split:.1%}")
+        logger.info(f"Augmentation pipeline: {self.augmentation_pipeline.get_augmentation_info()}")
     
     def _get_transforms(self, is_training: bool = True) -> transforms.Compose:
         """
@@ -142,26 +149,10 @@ class DatasetManager:
         Returns:
             Composed transforms
         """
-        transform_list = [
-            transforms.Resize(self.image_size),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=self.normalize_mean, std=self.normalize_std)
-        ]
-        
         if is_training:
-            # Add data augmentation for training
-            augmentation_transforms = [
-                transforms.RandomRotation(degrees=self.rotation_range),
-                transforms.ColorJitter(
-                    brightness=self.brightness_range,
-                    contrast=self.contrast_range
-                ),
-                transforms.RandomHorizontalFlip(p=0.5)
-            ]
-            # Insert augmentations before resize
-            transform_list = augmentation_transforms + transform_list
-        
-        return transforms.Compose(transform_list)
+            return self.augmentation_pipeline.get_training_transforms()
+        else:
+            return self.augmentation_pipeline.get_validation_transforms()
     
     def _load_synthetic_metadata(self) -> List[Dict[str, Any]]:
         """
@@ -405,3 +396,33 @@ class DatasetManager:
                     break
         
         return results
+    
+    def validate_augmentation_preserves_labels(self, sample_metadata: Dict[str, Any]) -> bool:
+        """
+        Validate that augmentation preserves ground truth labels.
+        
+        Args:
+            sample_metadata: Sample metadata with ground truth labels
+            
+        Returns:
+            True if augmentation preserves labels
+        """
+        # Load sample image
+        image_path = Path(sample_metadata['image_path'])
+        if not image_path.exists():
+            logger.warning(f"Image file not found: {image_path}")
+            return False
+        
+        image = Image.open(image_path).convert('RGB')
+        
+        # Extract ground truth labels
+        ground_truth = {
+            'height_meters': sample_metadata['height_meters'],
+            'wave_type': sample_metadata['wave_type'],
+            'direction': sample_metadata['direction']
+        }
+        
+        # Validate using augmentation pipeline
+        return self.augmentation_pipeline.validate_augmentation_preserves_labels(
+            image, ground_truth
+        )
