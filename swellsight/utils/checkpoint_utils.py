@@ -97,8 +97,8 @@ def load_checkpoint(
     if not filepath.exists():
         raise FileNotFoundError(f"Checkpoint not found: {filepath}")
     
-    # Load checkpoint
-    checkpoint = torch.load(filepath, map_location=device)
+    # Load checkpoint with weights_only=False to handle metadata
+    checkpoint = torch.load(filepath, map_location=device, weights_only=False)
     
     # Load model state
     model.load_state_dict(checkpoint['model_state_dict'])
@@ -132,7 +132,8 @@ def validate_checkpoint_integrity(filepath: Path) -> bool:
         True if checkpoint is valid, False otherwise
     """
     try:
-        checkpoint = torch.load(filepath, map_location='cpu')
+        # Load with weights_only=False to handle metadata
+        checkpoint = torch.load(filepath, map_location='cpu', weights_only=False)
         
         # Check required fields
         required_fields = ['model_state_dict', 'epoch', 'loss']
@@ -169,8 +170,8 @@ def get_checkpoint_info(filepath: Path) -> Dict[str, Any]:
         with open(metadata_file, 'r') as f:
             return json.load(f)
     
-    # Fall back to loading checkpoint
-    checkpoint = torch.load(filepath, map_location='cpu')
+    # Fall back to loading checkpoint with weights_only=False
+    checkpoint = torch.load(filepath, map_location='cpu', weights_only=False)
     return {
         'epoch': checkpoint.get('epoch', 0),
         'loss': checkpoint.get('loss', float('inf')),
