@@ -112,7 +112,7 @@ This implementation plan converts the multi-task deep learning design into discr
 - [x] 7. Checkpoint - Verify training pipeline
   - Ensure all tests pass, ask the user if questions arise.
 
-- [-] 8. Implement evaluation system
+- [x] 8. Implement evaluation system
   - [x] 8.1 Create MetricsCalculator class
     - Implement MAE, RMSE computation for height regression
     - Add accuracy, F1-score, confusion matrix for classification
@@ -125,19 +125,19 @@ This implementation plan converts the multi-task deep learning design into discr
     - **Property 15: Dataset Separation** ✅ PASSED
     - **Validates: Requirements 6.1, 6.2, 6.3**
 
-  - [ ] 8.3 Commit and push evaluation system changes
+  - [x] 8.3 Commit and push evaluation system changes
     - Commit and push changes with message: "feat: implement comprehensive evaluation system with MAE, RMSE, accuracy, F1-score metrics and property tests"
 
-- [ ] 9. Implement model persistence system
-  - [ ] 9.1 Create model saving and loading utilities
+- [-] 9. Implement model persistence system
+  - [x] 9.1 Create model saving and loading utilities
     - Implement PyTorch model serialization with complete state
     - Add model integrity validation during loading
     - Support both CPU and GPU device compatibility
     - _Requirements: 8.1, 8.3, 8.4, 8.5_
 
-  - [ ] 9.2 Write property tests for model persistence
-    - **Property 19: Model Serialization Round-Trip**
-    - **Property 21: Device Compatibility**
+  - [x] 9.2 Write property tests for model persistence
+    - **Property 19: Model Serialization Round-Trip** ✅ PASSED
+    - **Property 21: Device Compatibility** ✅ PASSED (CUDA skipped - not available)
     - **Validates: Requirements 8.1, 8.3, 8.5**
 
   - [ ] 9.3 Commit and push model persistence changes
