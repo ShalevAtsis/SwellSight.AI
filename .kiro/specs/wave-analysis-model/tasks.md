@@ -6,37 +6,37 @@ This implementation plan converts the multi-task deep learning design into discr
 
 ## Tasks
 
-- [-] 1. Set up project structure and dependencies
+- [x] 1. Set up project structure and dependencies
   - Create Python package structure for the wave analysis model
   - Install PyTorch, torchvision, timm (for ConvNeXt), Hypothesis, and other dependencies
   - Set up configuration management for model hyperparameters
   - Commit and push changes with message: "feat: initial project structure and dependencies for wave analysis model"
   - _Requirements: 1.1, 8.1_
 
-- [ ] 2. Implement core model architecture
-  - [ ] 2.1 Create WaveAnalysisModel class with ConvNeXt backbone
+- [-] 2. Implement core model architecture
+  - [x] 2.1 Create WaveAnalysisModel class with ConvNeXt backbone
     - Implement shared feature extractor using ConvNeXt-Base from timm
     - Create three task-specific heads (height regression, wave type, direction)
     - Ensure model outputs correct tensor shapes and formats
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6_
 
-  - [ ] 2.2 Write property test for model architecture
+  - [x] 2.2 Write property test for model architecture
     - **Property 1: Model Input/Output Consistency**
     - **Property 2: Feature Extractor Dimensionality**
     - **Property 3: Probability Vector Validity**
     - **Validates: Requirements 1.1, 1.2, 1.3, 1.4, 1.5, 1.6**
 
-  - [ ] 2.3 Implement MultiTaskLoss class
+  - [x] 2.3 Implement MultiTaskLoss class
     - Create weighted loss function combining SmoothL1Loss and CrossEntropyLoss
     - Implement learnable loss weights as nn.Parameter
     - Add loss computation logic for all three tasks
     - _Requirements: 3.1, 3.2_
 
-  - [ ] 2.4 Write property test for multi-task loss
+  - [x] 2.4 Write property test for multi-task loss
     - **Property 8: Multi-Task Loss Composition**
     - **Validates: Requirements 3.1, 3.2**
 
-  - [ ] 2.5 Commit and push model architecture changes
+  - [-] 2.5 Commit and push model architecture changes
     - Commit and push changes with message: "feat: implement multi-task wave analysis model architecture with ConvNeXt backbone and property tests"
 
 - [ ] 3. Checkpoint - Verify model architecture
