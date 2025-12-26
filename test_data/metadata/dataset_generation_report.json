@@ -1,0 +1,58 @@
+{
+  "generation_info": {
+    "total_samples_requested": 10,
+    "total_samples_generated": 10,
+    "success_rate": 1.0,
+    "output_directory": "test_data",
+    "image_size": [
+      768,
+      768
+    ]
+  },
+  "dataset_splits": {
+    "synthetic_total": 10,
+    "synthetic_train": 8,
+    "synthetic_val": 2,
+    "real_test": 0,
+    "train_split_ratio": 0.8,
+    "val_split_ratio": 0.2,
+    "image_size": [
+      768,
+      768
+    ],
+    "data_path": "test_data",
+    "train_wave_type_distribution": {
+      "BEACH_BREAK": 5,
+      "POINT_BREAK": 3
+    },
+    "train_direction_distribution": {
+      "RIGHT": 1,
+      "BOTH": 3,
+      "LEFT": 4
+    }
+  },
+  "parameter_diversity": {
+    "height_range": {
+      "min": 0.5071077082265171,
+      "max": 3.8790887813778236,
+      "mean": 2.0820534051760413,
+      "std": 1.2554364878801558
+    },
+    "wave_types": {
+      "POINT_BREAK": 3,
+      "BEACH_BREAK": 6,
+      "A_FRAME": 1
+    },
+    "directions": {
+      "LEFT": 5,
+      "BOTH": 4,
+      "RIGHT": 1
+    },
+    "total_samples": 10
+  },
+  "file_paths": {
+    "synthetic_data": "test_data\\synthetic",
+    "metadata": "test_data\\metadata",
+    "dataset_metadata": "test_data\\metadata\\synthetic_dataset_metadata.json"
+  }
+}

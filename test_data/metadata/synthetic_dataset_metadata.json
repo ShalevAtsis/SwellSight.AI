@@ -1,0 +1,182 @@
+[
+  {
+    "sample_id": 0,
+    "image_path": "test_data\\synthetic\\sample_000000.png",
+    "image_filename": "sample_000000.png",
+    "height_meters": 3.4675228855302516,
+    "wave_type": "POINT_BREAK",
+    "direction": "LEFT",
+    "generation_params": {
+      "period_seconds": 11.216879972455986,
+      "wavelength_meters": 151.30513448901675,
+      "depth_meters": 3.5939224643723993
+    },
+    "image_size": [
+      768,
+      768
+    ],
+    "created_timestamp": "2025-12-26T19:06:49.271350"
+  },
+  {
+    "sample_id": 1,
+    "image_path": "test_data\\synthetic\\sample_000001.png",
+    "image_filename": "sample_000001.png",
+    "height_meters": 0.5071077082265171,
+    "wave_type": "BEACH_BREAK",
+    "direction": "BOTH",
+    "generation_params": {
+      "period_seconds": 13.268168185785171,
+      "wavelength_meters": 68.93213091822787,
+      "depth_meters": 7.513210309539984
+    },
+    "image_size": [
+      768,
+      768
+    ],
+    "created_timestamp": "2025-12-26T19:06:49.417305"
+  },
+  {
+    "sample_id": 2,
+    "image_path": "test_data\\synthetic\\sample_000002.png",
+    "image_filename": "sample_000002.png",
+    "height_meters": 0.6712816660353339,
+    "wave_type": "BEACH_BREAK",
+    "direction": "RIGHT",
+    "generation_params": {
+      "period_seconds": 14.194505869434426,
+      "wavelength_meters": 98.75101767457349,
+      "depth_meters": 7.960411885842279
+    },
+    "image_size": [
+      768,
+      768
+    ],
+    "created_timestamp": "2025-12-26T19:06:49.566378"
+  },
+  {
+    "sample_id": 3,
+    "image_path": "test_data\\synthetic\\sample_000003.png",
+    "image_filename": "sample_000003.png",
+    "height_meters": 2.5797835025796294,
+    "wave_type": "A_FRAME",
+    "direction": "LEFT",
+    "generation_params": {
+      "period_seconds": 13.254758244924407,
+      "wavelength_meters": 109.9001016449301,
+      "depth_meters": 4.246363235369512
+    },
+    "image_size": [
+      768,
+      768
+    ],
+    "created_timestamp": "2025-12-26T19:06:49.592316"
+  },
+  {
+    "sample_id": 4,
+    "image_path": "test_data\\synthetic\\sample_000004.png",
+    "image_filename": "sample_000004.png",
+    "height_meters": 3.463293892727408,
+    "wave_type": "BEACH_BREAK",
+    "direction": "LEFT",
+    "generation_params": {
+      "period_seconds": 12.914930324649227,
+      "wavelength_meters": 199.2874155451083,
+      "depth_meters": 7.744953562756616
+    },
+    "image_size": [
+      768,
+      768
+    ],
+    "created_timestamp": "2025-12-26T19:06:49.694164"
+  },
+  {
+    "sample_id": 5,
+    "image_path": "test_data\\synthetic\\sample_000005.png",
+    "image_filename": "sample_000005.png",
+    "height_meters": 2.082149984553446,
+    "wave_type": "BEACH_BREAK",
+    "direction": "LEFT",
+    "generation_params": {
+      "period_seconds": 13.152074985712586,
+      "wavelength_meters": 105.97955094984027,
+      "depth_meters": 5.01551230766148
+    },
+    "image_size": [
+      768,
+      768
+    ],
+    "created_timestamp": "2025-12-26T19:06:49.863054"
+  },
+  {
+    "sample_id": 6,
+    "image_path": "test_data\\synthetic\\sample_000006.png",
+    "image_filename": "sample_000006.png",
+    "height_meters": 2.6937791745188164,
+    "wave_type": "BEACH_BREAK",
+    "direction": "BOTH",
+    "generation_params": {
+      "period_seconds": 10.159653468662327,
+      "wavelength_meters": 143.42839368013463,
+      "depth_meters": 2.8935909631525805
+    },
+    "image_size": [
+      768,
+      768
+    ],
+    "created_timestamp": "2025-12-26T19:06:49.963298"
+  },
+  {
+    "sample_id": 7,
+    "image_path": "test_data\\synthetic\\sample_000007.png",
+    "image_filename": "sample_000007.png",
+    "height_meters": 0.7505522048098625,
+    "wave_type": "POINT_BREAK",
+    "direction": "BOTH",
+    "generation_params": {
+      "period_seconds": 8.502048131419805,
+      "wavelength_meters": 168.0094522391097,
+      "depth_meters": 3.7647316147404952
+    },
+    "image_size": [
+      768,
+      768
+    ],
+    "created_timestamp": "2025-12-26T19:06:50.000363"
+  },
+  {
+    "sample_id": 8,
+    "image_path": "test_data\\synthetic\\sample_000008.png",
+    "image_filename": "sample_000008.png",
+    "height_meters": 0.7259742514013218,
+    "wave_type": "BEACH_BREAK",
+    "direction": "LEFT",
+    "generation_params": {
+      "period_seconds": 9.50936123300149,
+      "wavelength_meters": 114.84901945287056,
+      "depth_meters": 4.079333176044025
+    },
+    "image_size": [
+      768,
+      768
+    ],
+    "created_timestamp": "2025-12-26T19:06:50.123961"
+  },
+  {
+    "sample_id": 9,
+    "image_path": "test_data\\synthetic\\sample_000009.png",
+    "image_filename": "sample_000009.png",
+    "height_meters": 3.8790887813778236,
+    "wave_type": "POINT_BREAK",
+    "direction": "BOTH",
+    "generation_params": {
+      "period_seconds": 14.902687537606445,
+      "wavelength_meters": 83.57722899559343,
+      "depth_meters": 9.052616334258495
+    },
+    "image_size": [
+      768,
+      768
+    ],
+    "created_timestamp": "2025-12-26T19:06:50.155126"
+  }
+]
