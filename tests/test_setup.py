@@ -68,6 +68,8 @@ def test_loss_function():
     }
     
     # Compute loss
-    loss = loss_fn(predictions, targets)
-    assert isinstance(loss, torch.Tensor)
-    assert loss.dim() == 0  # Scalar loss
+    loss_dict = loss_fn(predictions, targets)
+    assert isinstance(loss_dict, dict)
+    assert 'total_loss' in loss_dict
+    assert isinstance(loss_dict['total_loss'], torch.Tensor)
+    assert loss_dict['total_loss'].dim() == 0  # Scalar loss
