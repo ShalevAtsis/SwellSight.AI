@@ -43,28 +43,57 @@ pip install -r requirements.txt
 ### Training
 ```python
 from swellsight import WaveAnalysisModel, Trainer, ModelConfig
+from swellsight.data import SyntheticDataGenerator, DatasetManager
+
+# Initialize configuration
+config = ModelConfig(
+    backbone='convnext_base',
+    input_size=(768, 768),
+    batch_size=32,
+    learning_rate=1e-4,
+    num_epochs=100
+)
+
+# Generate synthetic training data
+data_generator = SyntheticDataGenerator(config)
+data_generator.generate_dataset(num_samples=10000, output_dir="data/synthetic")
+
+# Set up data management
+dataset_manager = DatasetManager(config)
+train_loader, val_loader = dataset_manager.get_data_loaders("data/synthetic")
 
 # Initialize model and trainer
-config = ModelConfig()
 model = WaveAnalysisModel(config)
 trainer = Trainer(model, config)
 
 # Train the model
-trainer.train()
+trainer.train(train_loader, val_loader)
 ```
 
 ### Inference
 ```python
-from swellsight import InferenceEngine
+from swellsight.inference import InferenceEngine
 
 # Load trained model
-engine = InferenceEngine.from_checkpoint("path/to/checkpoint.pth")
+engine = InferenceEngine.from_checkpoint("checkpoints/best_model.pth")
 
-# Analyze wave image
+# Single image prediction
 result = engine.predict("path/to/wave_image.jpg")
 print(f"Wave height: {result.height_meters:.1f}m")
 print(f"Wave type: {result.wave_type}")
 print(f"Direction: {result.direction}")
+print(f"Confidence: {result.confidence_scores}")
+
+# Batch prediction
+results = engine.predict_batch([
+    "image1.jpg", 
+    "image2.png", 
+    "image3.jpeg"
+])
+
+# Get model information
+info = engine.get_model_info()
+print(f"Model has {info['model_parameters']:,} parameters")
 ```
 
 ## Project Structure
@@ -103,6 +132,148 @@ The SwellSight model uses a multi-task architecture:
 - Manual labeling for validation set
 - Separate test set (never used in training)
 
+## API Reference
+
+### InferenceEngine
+
+The main interface for wave analysis predictions.
+
+#### Methods
+
+**`InferenceEngine.from_checkpoint(checkpoint_path, device="auto")`**
+- Load a trained model from checkpoint
+- `checkpoint_path`: Path to model checkpoint file
+- `device`: Device to run inference on ("auto", "cpu", "cuda")
+- Returns: Initialized InferenceEngine instance
+
+**`predict(image_path)`**
+- Predict wave parameters from a single image
+- `image_path`: Path to image file (JPEG, PNG supported)
+- Returns: `WavePrediction` object
+- Raises: `InferenceError` for invalid inputs
+
+**`predict_batch(image_paths)`**
+- Predict wave parameters for multiple images
+- `image_paths`: List of image file paths
+- Returns: List of `WavePrediction` objects
+
+**`predict_from_tensor(image_tensor)`**
+- Predict from preprocessed tensor
+- `image_tensor`: Torch tensor [1,3,H,W] or [3,H,W]
+- Returns: `WavePrediction` object
+
+**`get_model_info()`**
+- Get model metadata and configuration
+- Returns: Dictionary with model information
+
+### WavePrediction
+
+Structured prediction result containing wave parameters and confidence scores.
+
+#### Attributes
+- `height_meters`: Wave height in meters (float)
+- `wave_type`: Predicted wave type (str)
+- `direction`: Wave direction (str)
+- `wave_type_probs`: Probability distribution for wave types (dict)
+- `direction_probs`: Probability distribution for directions (dict)
+- `confidence_scores`: Confidence scores for each prediction (dict)
+
+#### Methods
+- `to_dict()`: Convert to dictionary for JSON serialization
+- `to_json()`: Convert to JSON string
+
+### Response Format
+
+```json
+{
+  "height_meters": 2.3,
+  "wave_type": "A_FRAME",
+  "direction": "LEFT",
+  "wave_type_probabilities": {
+    "A_FRAME": 0.85,
+    "CLOSEOUT": 0.10,
+    "BEACH_BREAK": 0.03,
+    "POINT_BREAK": 0.02
+  },
+  "direction_probabilities": {
+    "LEFT": 0.78,
+    "RIGHT": 0.15,
+    "BOTH": 0.07
+  },
+  "confidence_scores": {
+    "height": 0.82,
+    "wave_type": 0.85,
+    "direction": 0.78
+  }
+}
+```
+
+### Error Handling
+
+The API includes comprehensive error handling:
+
+- **`InferenceError`**: Raised for prediction failures
+- **File validation**: Checks for file existence and supported formats
+- **Image validation**: Validates image dimensions and format
+- **Tensor validation**: Ensures correct tensor shapes and types
+
+### Supported Formats
+
+- **Image formats**: JPEG (.jpg, .jpeg), PNG (.png)
+- **Input sizes**: 32x32 to 4096x4096 pixels
+- **Color modes**: RGB (3 channels)
+
+## Training and Evaluation
+
+### Command Line Interface
+
+```bash
+# Generate synthetic training data
+python -m swellsight.scripts.generate_training_data \
+    --num_samples 10000 \
+    --output_dir data/synthetic \
+    --config_path config/model_config.yaml
+
+# Train the model
+python -m swellsight.scripts.train_end_to_end \
+    --data_dir data/synthetic \
+    --checkpoint_dir checkpoints \
+    --config_path config/model_config.yaml \
+    --num_epochs 100
+
+# Evaluate on test set
+python -m swellsight.scripts.evaluate_model \
+    --checkpoint_path checkpoints/best_model.pth \
+    --test_data_dir data/real_test \
+    --output_dir results
+```
+
+### Configuration
+
+Model configuration is managed through YAML files:
+
+```yaml
+# config/model_config.yaml
+model:
+  backbone: "convnext_base"
+  input_size: [768, 768]
+  feature_dim: 2048
+  hidden_dim: 512
+  dropout_rate: 0.1
+
+training:
+  batch_size: 32
+  learning_rate: 1e-4
+  num_epochs: 100
+  weight_decay: 1e-5
+  
+data:
+  min_height: 0.3
+  max_height: 4.0
+  wave_types: ["A_FRAME", "CLOSEOUT", "BEACH_BREAK", "POINT_BREAK"]
+  directions: ["LEFT", "RIGHT", "BOTH"]
+```
+
 ## Testing
 
 The project uses comprehensive testing including:
@@ -119,18 +290,33 @@ pytest --cov=swellsight
 
 # Run property-based tests only
 pytest tests/property/
+
+# Run integration tests
+pytest tests/integration/
+
+# Run with verbose output
+pytest -v
 ```
 
-## Performance Metrics
+### Test Categories
 
-### Regression (Wave Height)
-- Mean Absolute Error (MAE)
-- Root Mean Squared Error (RMSE)
+**Property-Based Tests**: Validate universal properties across randomly generated inputs
+- Model architecture consistency
+- Data pipeline integrity
+- API response structure
+- Mathematical properties of loss functions
 
-### Classification (Wave Type & Direction)
-- Accuracy
-- F1-Score
-- Confusion Matrix
+**Integration Tests**: Test complete workflows
+- End-to-end training pipeline
+- Real image processing
+- API integration with various input formats
+- Model checkpoint persistence
+
+**Unit Tests**: Test individual components
+- Model forward pass
+- Loss function computation
+- Data loading and preprocessing
+- Configuration management
 
 ## Contributing
 
