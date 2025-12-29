@@ -566,3 +566,169 @@ class TestDataAugmentationProperties:
         assert train_batch['height'].dtype == val_batch['height'].dtype
         assert train_batch['wave_type'].dtype == val_batch['wave_type'].dtype
         assert train_batch['direction'].dtype == val_batch['direction'].dtype
+
+
+class TestRealDataIsolationProperties:
+    """Property-based tests for real data isolation."""
+    
+    def setup_method(self):
+        """Set up test environment."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.temp_path = Path(self.temp_dir)
+        
+        # Create directory structure
+        (self.temp_path / 'synthetic').mkdir(parents=True)
+        (self.temp_path / 'real' / 'images').mkdir(parents=True)
+        (self.temp_path / 'real' / 'labels').mkdir(parents=True)
+        (self.temp_path / 'metadata').mkdir(parents=True)
+        
+    def teardown_method(self):
+        """Clean up test environment."""
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+    
+    @given(st.integers(min_value=5, max_value=10))
+    @settings(max_examples=2, deadline=None)
+    def test_real_data_isolation(self, num_synthetic_samples):
+        """
+        Feature: wave-analysis-model, Property 17: Real Data Isolation
+        
+        For any dataset configuration, real-world images should be completely
+        isolated from synthetic training data, with no overlap in image paths
+        or sample IDs, and all real samples marked with data_source='real'.
+        """
+        from swellsight.data.dataset_manager import DatasetManager
+        from swellsight.data.real_data_loader import RealDataLoader, ManualLabelingUtility
+        import csv
+        
+        # Generate synthetic dataset first
+        config = {
+            'synthetic_data_path': str(self.temp_path / 'synthetic'),
+            'metadata_path': str(self.temp_path / 'metadata'),
+            'image_size': (768, 768)
+        }
+        generator = SyntheticDataGenerator(config)
+        synthetic_metadata = generator.generate_dataset(num_synthetic_samples)
+        
+        # Create some mock real images and labels
+        real_images_path = self.temp_path / 'real' / 'images'
+        real_labels_path = self.temp_path / 'real' / 'labels'
+        
+        # Create mock real image files
+        real_image_names = ['beach_cam_001.jpg', 'beach_cam_002.jpg', 'beach_cam_003.jpg']
+        for img_name in real_image_names:
+            # Create a simple test image
+            test_image = Image.new('RGB', (768, 768), color='blue')
+            test_image.save(real_images_path / img_name)
+        
+        # Create manual labels CSV
+        labels_file = real_labels_path / 'manual_labels.csv'
+        with open(labels_file, 'w', newline='') as csvfile:
+            fieldnames = [
+                'image_filename', 'height_meters', 'wave_type', 'direction',
+                'labeler_id', 'confidence', 'notes', 'label_timestamp'
+            ]
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            
+            # Add labels for each real image
+            for i, img_name in enumerate(real_image_names):
+                writer.writerow({
+                    'image_filename': img_name,
+                    'height_meters': 1.5 + i * 0.5,  # Different heights
+                    'wave_type': ['A_FRAME', 'CLOSEOUT', 'BEACH_BREAK'][i],
+                    'direction': ['LEFT', 'RIGHT', 'BOTH'][i],
+                    'labeler_id': 'test_labeler',
+                    'confidence': 0.9,
+                    'notes': f'Test label {i+1}',
+                    'label_timestamp': '2024-01-01T12:00:00'
+                })
+        
+        # Initialize real data loader and create metadata
+        real_data_loader = RealDataLoader(str(self.temp_path / 'real'), config)
+        labels = real_data_loader.load_manual_labels()
+        real_metadata = real_data_loader.create_metadata_from_labels(labels)
+        real_data_loader.save_real_metadata(real_metadata)
+        
+        # Create dataset manager
+        dataset_config = {
+            'train_split': 0.8,
+            'val_split': 0.2,
+            'image_size': (768, 768),
+            'num_workers': 0
+        }
+        manager = DatasetManager(str(self.temp_path), dataset_config)
+        
+        # Test 1: Validate real data isolation through dataset manager
+        integrity_results = manager.validate_dataset_integrity()
+        assert integrity_results['real_data_isolated'] is True
+        
+        # Test 2: Verify no overlap in image paths
+        synthetic_image_paths = {Path(sample['image_path']).name for sample in synthetic_metadata}
+        real_image_paths = {Path(sample['image_path']).name for sample in real_metadata}
+        
+        overlap = synthetic_image_paths.intersection(real_image_paths)
+        assert len(overlap) == 0, f"Found overlapping image paths: {overlap}"
+        
+        # Test 3: Verify no overlap in sample IDs
+        synthetic_sample_ids = {sample['sample_id'] for sample in synthetic_metadata}
+        real_sample_ids = {sample['sample_id'] for sample in real_metadata}
+        
+        id_overlap = synthetic_sample_ids.intersection(real_sample_ids)
+        assert len(id_overlap) == 0, f"Found overlapping sample IDs: {id_overlap}"
+        
+        # Test 4: Verify all real samples are marked as real data source
+        for sample in real_metadata:
+            assert sample.get('data_source') == 'real', f"Sample {sample['sample_id']} not marked as real"
+        
+        # Test 5: Verify all synthetic samples are marked as synthetic data source
+        for sample in synthetic_metadata:
+            assert sample.get('data_source') == 'synthetic', f"Sample {sample['sample_id']} not marked as synthetic"
+        
+        # Test 6: Verify real data loader validation method
+        assert real_data_loader.validate_real_data_isolation(synthetic_metadata) is True
+        
+        # Test 7: Verify real test loader only contains real data
+        real_test_loader = manager.get_real_test_loader(batch_size=2)
+        
+        if len(real_metadata) > 0:
+            # Get a batch from real test loader
+            real_batch = next(iter(real_test_loader))
+            
+            # Verify batch contains real data markers
+            assert 'data_source' in real_batch
+            for data_source in real_batch['data_source']:
+                assert data_source == 'real'
+        
+        # Test 8: Verify synthetic train/val loaders don't contain real data
+        train_loader = manager.get_train_loader(batch_size=2)
+        val_loader = manager.get_validation_loader(batch_size=2)
+        
+        # Check train loader
+        train_batch = next(iter(train_loader))
+        train_sample_ids = train_batch['sample_id']
+        
+        for sample_id in train_sample_ids:
+            assert sample_id not in real_sample_ids, f"Real sample {sample_id} found in training data"
+        
+        # Check validation loader
+        val_batch = next(iter(val_loader))
+        val_sample_ids = val_batch['sample_id']
+        
+        for sample_id in val_sample_ids:
+            assert sample_id not in real_sample_ids, f"Real sample {sample_id} found in validation data"
+        
+        # Test 9: Verify dataset info correctly separates real and synthetic counts
+        dataset_info = manager.get_dataset_info()
+        
+        assert dataset_info['synthetic_total'] == num_synthetic_samples
+        assert dataset_info['real_test'] == len(real_metadata)
+        assert dataset_info['synthetic_train'] + dataset_info['synthetic_val'] == num_synthetic_samples
+        
+        # Test 10: Verify manual labeling utility validation
+        labeling_utility = ManualLabelingUtility(str(self.temp_path / 'real'))
+        validation_results = labeling_utility.validate_labels()
+        
+        assert validation_results['valid'] is True
+        assert validation_results['total_labels'] == len(real_image_names)
+        assert validation_results['valid_labels'] == len(real_image_names)
+        assert len(validation_results['errors']) == 0

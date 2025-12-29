@@ -138,6 +138,7 @@ class SyntheticDataGenerator:
             'height_meters': ground_truth['height_meters'],
             'wave_type': ground_truth['wave_type'],
             'direction': ground_truth['direction'],
+            'data_source': 'synthetic',  # Mark as synthetic data
             'generation_params': {
                 'period_seconds': wave_params.period_seconds,
                 'wavelength_meters': wave_params.wavelength_meters,

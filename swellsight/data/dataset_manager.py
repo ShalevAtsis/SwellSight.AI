@@ -11,6 +11,7 @@ from PIL import Image
 import logging
 
 from .augmentation import WaveAugmentationPipeline, create_augmentation_pipeline
+from .real_data_loader import RealDataLoader
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -130,6 +131,9 @@ class DatasetManager:
         # Initialize augmentation pipeline
         self.augmentation_pipeline = create_augmentation_pipeline(self.config)
         
+        # Initialize real data loader
+        self.real_data_loader = RealDataLoader(str(self.real_path), self.config)
+        
         # Cached datasets
         self._train_dataset = None
         self._val_dataset = None
@@ -173,24 +177,7 @@ class DatasetManager:
         logger.info(f"Loaded {len(metadata)} synthetic samples from metadata")
         return metadata
     
-    def _load_real_metadata(self) -> List[Dict[str, Any]]:
-        """
-        Load real dataset metadata.
-        
-        Returns:
-            List of sample metadata
-        """
-        metadata_file = self.metadata_path / 'real_dataset_metadata.json'
-        
-        if not metadata_file.exists():
-            logger.warning(f"Real metadata file not found: {metadata_file}")
-            return []
-        
-        with open(metadata_file, 'r') as f:
-            metadata = json.load(f)
-        
-        logger.info(f"Loaded {len(metadata)} real samples from metadata")
-        return metadata
+
     
     def _split_synthetic_data(self, metadata: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         """
@@ -280,32 +267,18 @@ class DatasetManager:
             drop_last=False
         )
     
-    def get_real_test_loader(self, batch_size: int = 32) -> DataLoader:
+    def get_real_test_loader(self, batch_size: int = 32, labels_file: Optional[str] = None) -> DataLoader:
         """
         Get real-world test data loader.
         
         Args:
             batch_size: Batch size for data loading
+            labels_file: Optional path to labels file
             
         Returns:
             Real test data loader
         """
-        if self._real_test_dataset is None:
-            # Load real data metadata
-            real_metadata = self._load_real_metadata()
-            
-            # Create dataset with validation transforms (no augmentation)
-            test_transform = self._get_transforms(is_training=False)
-            self._real_test_dataset = WaveDataset(real_metadata, transform=test_transform)
-        
-        return DataLoader(
-            self._real_test_dataset,
-            batch_size=batch_size,
-            shuffle=False,  # No shuffling for test data
-            num_workers=self.num_workers,
-            pin_memory=self.pin_memory,
-            drop_last=False
-        )
+        return self.real_data_loader.get_test_loader(batch_size, labels_file)
     
     def get_dataset_info(self) -> Dict[str, Any]:
         """
@@ -315,7 +288,7 @@ class DatasetManager:
             Dictionary with dataset statistics
         """
         synthetic_metadata = self._load_synthetic_metadata()
-        real_metadata = self._load_real_metadata()
+        real_info = self.real_data_loader.get_dataset_info()
         
         train_metadata, val_metadata = self._split_synthetic_data(synthetic_metadata)
         
@@ -323,11 +296,12 @@ class DatasetManager:
             'synthetic_total': len(synthetic_metadata),
             'synthetic_train': len(train_metadata),
             'synthetic_val': len(val_metadata),
-            'real_test': len(real_metadata),
+            'real_test': real_info.get('total_samples', 0),
             'train_split_ratio': self.train_split,
             'val_split_ratio': self.val_split,
             'image_size': self.image_size,
-            'data_path': str(self.data_path)
+            'data_path': str(self.data_path),
+            'real_data_info': real_info
         }
         
         # Add class distribution if data exists
@@ -358,15 +332,18 @@ class DatasetManager:
             'real_metadata_exists': False,
             'train_val_split_valid': False,
             'no_data_leakage': True,
-            'all_images_exist': True
+            'all_images_exist': True,
+            'real_data_isolated': True
         }
         
         # Check metadata files exist
         synthetic_meta_file = self.metadata_path / 'synthetic_dataset_metadata.json'
-        real_meta_file = self.metadata_path / 'real_dataset_metadata.json'
         
         results['synthetic_metadata_exists'] = synthetic_meta_file.exists()
-        results['real_metadata_exists'] = real_meta_file.exists()
+        
+        # Check real data through real data loader
+        real_metadata = self.real_data_loader.load_real_metadata()
+        results['real_metadata_exists'] = len(real_metadata) > 0
         
         if results['synthetic_metadata_exists']:
             synthetic_metadata = self._load_synthetic_metadata()
@@ -394,6 +371,10 @@ class DatasetManager:
                 if not image_path.exists():
                     results['all_images_exist'] = False
                     break
+            
+            # Validate real data isolation
+            if real_metadata:
+                results['real_data_isolated'] = self.real_data_loader.validate_real_data_isolation(synthetic_metadata)
         
         return results
     
