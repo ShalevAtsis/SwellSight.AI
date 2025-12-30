@@ -29,17 +29,19 @@ SwellSight Wave Analysis Model is a multi-task deep learning system that extract
 5. THE type classification Task_Head SHALL output probabilities for 4 classes: A-frame, closeout, beach break, point break
 6. THE direction classification Task_Head SHALL output probabilities for 3 classes: left, right, both
 
-### Requirement 2: Training Data Pipeline
+### Requirement 2: MiDaS Depth Extraction and ControlNet Synthetic Generation
 
-**User Story:** As a machine learning engineer, I want an automated pipeline that generates labeled training data from synthetic depth maps, so that I can create a large-scale dataset with perfect ground truth labels.
+**User Story:** As a machine learning engineer, I want an automated pipeline that uses MiDaS to extract depth maps from real beach images and generates photorealistic synthetic variants with ControlNet using comprehensive augmentation parameters, so that I can create a large-scale dataset with diverse wave conditions and environmental variations.
 
 #### Acceptance Criteria
 
-1. WHEN a depth map is generated, THE Training_Pipeline SHALL automatically extract the corresponding wave parameters used in generation
-2. THE Training_Pipeline SHALL convert depth maps to photorealistic images using ControlNet
-3. THE Training_Pipeline SHALL create training samples with format: (image, height_meters, wave_type, direction)
-4. THE Training_Pipeline SHALL generate at least 10,000 synthetic training samples
-5. WHEN generating synthetic data, THE Training_Pipeline SHALL vary wave parameters across realistic ranges: height 0.3-4.0m, all breaking types, all directions
+1. THE MiDaS_Depth_Extractor SHALL process real beach camera images from data/real/images and extract accurate depth maps using HuggingFace MiDaS model
+2. THE MiDaS_Depth_Extractor SHALL handle various image resolutions and aspect ratios commonly found in beach cameras
+3. THE ControlNet_Generator SHALL use extracted depth maps to create photorealistic synthetic beach camera images
+4. THE ControlNet_Generator SHALL generate synthetic images augmented according to 10 attribute categories: Camera View Geometry, Wave Field Structure, Breaking Behavior, Shore Interaction, Water Surface Texture, Lighting and Sun Position, Atmospheric Conditions, Weather State, Optical and Sensor Artifacts, and Scene Occlusions and Noise Objects
+5. THE Augmentation_System SHALL vary parameters within realistic ranges for each attribute category to create diverse training samples
+6. THE Real_To_Synthetic_Pipeline SHALL maintain correspondence between real images, their depth maps, generated synthetic variants, and augmentation parameters
+7. THE Real_To_Synthetic_Pipeline SHALL preserve ground truth labels from data/real/labels/labels.json for validation purposes
 
 ### Requirement 3: Model Training and Optimization
 
@@ -89,17 +91,36 @@ SwellSight Wave Analysis Model is a multi-task deep learning system that extract
 4. THE Evaluation_System SHALL generate performance reports comparing predicted vs actual values
 5. THE Evaluation_System SHALL track metrics across different wave height ranges and breaking types
 
-### Requirement 7: Dataset Management
+### Requirement 7: Depth-Based Wave Analysis
 
-**User Story:** As a data scientist, I want organized dataset management with proper train/validation/test splits, so that I can ensure robust model evaluation and prevent data leakage.
+**User Story:** As a computer vision engineer, I want to analyze wave parameters from depth maps extracted by MiDaS, so that I can estimate wave characteristics from real beach camera images.
 
 #### Acceptance Criteria
 
-1. THE Dataset_Manager SHALL maintain separate datasets for synthetic training data and real validation data
-2. THE Dataset_Manager SHALL implement 80/20 train/validation split for synthetic data
-3. THE Dataset_Manager SHALL store all real-world images in a separate test set never used during training
-4. THE Dataset_Manager SHALL provide data loading utilities with batch processing and shuffling
-5. THE Dataset_Manager SHALL maintain metadata files linking images to their ground truth labels
+1. THE Depth_Analyzer SHALL estimate wave height from MiDaS depth maps using wave crest detection
+2. THE Depth_Analyzer SHALL identify wave breaking patterns from depth map gradients and discontinuities
+3. THE Depth_Analyzer SHALL determine wave direction from depth map flow analysis
+4. WHEN analyzing a depth map, THE Depth_Analyzer SHALL provide confidence scores for each estimated parameter
+5. THE Depth_Analyzer SHALL handle depth maps with varying quality and resolution from different MiDaS model versions
+
+### Requirement 9: Comprehensive Augmentation Parameter System
+
+**User Story:** As a computer vision engineer, I want a comprehensive augmentation system that systematically varies 10 categories of beach camera scene attributes, so that I can generate synthetic training data that covers the full range of real-world beach camera conditions.
+
+#### Acceptance Criteria
+
+1. THE Camera_View_Geometry_System SHALL control camera height above sea level (1-50m), tilt angle toward horizon (-10° to +30°), horizontal field of view (30-120°), distance to breaking zone (10-500m), and lateral offset relative to shoreline center (-100m to +100m)
+2. THE Wave_Field_Structure_System SHALL define dominant wave height (0.3-4.0m), wavelength (5-200m), wave period (3-20s), directional spread (0-45°), and number of visible wave fronts (1-10)
+3. THE Breaking_Behavior_System SHALL model breaking type (spilling, plunging, collapsing, surging), breaker intensity (0.0-1.0), crest sharpness (0.0-1.0), and foam coverage percentage (0-100%)
+4. THE Shore_Interaction_System SHALL control beach slope angle (1-45°), run-up distance (0-50m), backwash visibility (boolean), wet sand reflectivity (0.0-1.0), and shoreline curvature (-0.1 to +0.1)
+5. THE Water_Surface_Texture_System SHALL represent surface roughness (0.0-1.0), ripples frequency (0-100 Hz), wind streak visibility (0.0-1.0), specular highlight intensity (0.0-1.0), and micro-foam density (0.0-1.0)
+6. THE Lighting_Sun_Position_System SHALL determine sun elevation angle (0-90°), sun azimuth angle (0-360°), light intensity (0.0-2.0), shadow softness (0.0-1.0), and sun glare probability (0.0-1.0)
+7. THE Atmospheric_Conditions_System SHALL simulate haze density (0.0-1.0), fog layer height (0-100m), humidity level (0.0-1.0), sky clarity (clear, partly_cloudy, overcast, stormy), and contrast attenuation factor (0.0-1.0)
+8. THE Weather_State_System SHALL add cloud coverage percentage (0-100%), cloud type (cumulus, stratus, cirrus, cumulonimbus), rain presence (boolean), rain streak intensity (0.0-1.0), and storminess scalar (0.0-1.0)
+9. THE Optical_Sensor_Artifacts_System SHALL mimic lens distortion coefficient (-0.5 to +0.5), motion blur kernel size (0-20 pixels), sensor noise level (0.0-0.1), compression artifacts strength (0.0-1.0), and chromatic aberration intensity (0.0-1.0)
+10. THE Scene_Occlusions_Noise_System SHALL introduce people count (0-20), surfboard presence (boolean), birds count (0-50), sea spray occlusion probability (0.0-1.0), and foreground object blur amount (0-10 pixels)
+11. THE Augmentation_Parameter_Generator SHALL sample parameters from realistic distributions for each category to ensure diverse but plausible synthetic images
+12. THE Augmentation_Metadata_System SHALL record all parameter values used for each synthetic image to enable analysis and debugging
 
 ### Requirement 8: Model Persistence and Deployment
 
@@ -112,3 +133,43 @@ SwellSight Wave Analysis Model is a multi-task deep learning system that extract
 3. THE Model_Loading_System SHALL restore models with identical inference behavior to training time
 4. THE Model_Loading_System SHALL validate model integrity during loading process
 5. THE Deployment_System SHALL support both CPU and GPU inference modes
+
+### Requirement 10: Model Versioning and Performance Benchmarks
+
+**User Story:** As a machine learning engineer, I want comprehensive model versioning and performance tracking, so that I can manage model evolution and ensure consistent performance across deployments.
+
+#### Acceptance Criteria
+
+1. THE Model_Versioning_System SHALL assign semantic version numbers to all trained models following semver format (major.minor.patch)
+2. THE Model_Versioning_System SHALL track model lineage including parent models, training data versions, and configuration changes
+3. THE Performance_Benchmark_System SHALL measure and record inference latency on standard hardware configurations (CPU, GPU)
+4. THE Performance_Benchmark_System SHALL track memory usage during training and inference phases
+5. THE Performance_Benchmark_System SHALL maintain performance regression tests to detect degradation across model versions
+6. THE Model_Registry_System SHALL store model artifacts with searchable metadata including performance metrics, training parameters, and validation scores
+
+### Requirement 11: Production Deployment and Monitoring
+
+**User Story:** As a DevOps engineer, I want robust deployment capabilities with comprehensive monitoring, so that I can maintain reliable wave analysis services in production.
+
+#### Acceptance Criteria
+
+1. THE Deployment_System SHALL support containerized deployment using Docker with optimized inference containers
+2. THE Deployment_System SHALL provide REST API endpoints with OpenAPI specification for integration
+3. THE Monitoring_System SHALL track inference request rates, response times, and error rates
+4. THE Monitoring_System SHALL implement health checks for model availability and performance
+5. THE Alerting_System SHALL notify operators when inference accuracy drops below acceptable thresholds
+6. THE Scaling_System SHALL support horizontal scaling based on request load and processing time
+7. THE Deployment_System SHALL implement blue-green deployment strategies for zero-downtime model updates
+
+### Requirement 12: Data Quality and Validation
+
+**User Story:** As a data scientist, I want comprehensive data quality validation and monitoring, so that I can ensure training data integrity and detect data drift in production.
+
+#### Acceptance Criteria
+
+1. THE Data_Quality_System SHALL validate image format, resolution, and color space consistency across all input data
+2. THE Data_Quality_System SHALL detect and flag corrupted or incomplete image files before processing
+3. THE Label_Validation_System SHALL verify ground truth labels are within expected ranges and distributions
+4. THE Data_Drift_Detection_System SHALL monitor statistical properties of production input data compared to training data
+5. THE Data_Drift_Detection_System SHALL alert when input data distribution shifts beyond acceptable thresholds
+6. THE Metadata_Tracking_System SHALL record provenance information for all training and validation samples

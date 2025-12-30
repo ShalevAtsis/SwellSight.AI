@@ -122,10 +122,25 @@ class SyntheticDataGenerator:
         # Convert depth map to photorealistic image using ControlNet
         rgb_image = self._depth_to_image_controlnet(depth_map, wave_params)
         
-        # Save image
-        image_filename = f"sample_{sample_id:06d}.png"
+        # Save image with error handling
+        image_filename = f"sample_{sample_id:06d}.jpg"
         image_path = self.output_path / image_filename
-        rgb_image.save(image_path)
+        
+        try:
+            # Convert to RGB mode if needed (removes alpha channel issues)
+            if rgb_image.mode != 'RGB':
+                rgb_image = rgb_image.convert('RGB')
+            rgb_image.save(image_path, 'JPEG', quality=95)
+        except Exception as e:
+            logger.warning(f"Failed to save as JPEG, trying PNG: {e}")
+            # Fallback to PNG with error handling
+            image_filename = f"sample_{sample_id:06d}.png"
+            image_path = self.output_path / image_filename
+            try:
+                rgb_image.save(image_path, 'PNG')
+            except Exception as png_error:
+                logger.error(f"Failed to save image {sample_id}: {png_error}")
+                raise
         
         # Extract ground truth labels (these are preserved from generation parameters)
         ground_truth = self._extract_ground_truth_labels(wave_params)
