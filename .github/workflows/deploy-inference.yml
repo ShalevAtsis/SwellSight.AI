@@ -1,0 +1,278 @@
+name: Deploy SwellSight Inference Service
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'swellsight/**'
+      - 'docker/**'
+      - 'k8s/**'
+      - 'requirements.txt'
+      - '.github/workflows/deploy-inference.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'swellsight/**'
+      - 'docker/**'
+      - 'k8s/**'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: swellsight/inference
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.11]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov
+    
+    - name: Run unit tests
+      run: |
+        python -m pytest tests/unit/ -v --cov=swellsight --cov-report=xml
+    
+    - name: Run API tests
+      run: |
+        python -m pytest tests/property/test_production_api_properties.py::TestProductionAPIProperties::test_api_health_check_functionality -v
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+    
+    - name: Build and push Docker image
+      id: build
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./docker/Dockerfile.inference
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        platforms: linux/amd64,linux/arm64
+
+  security-scan:
+    needs: build
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ needs.build.outputs.image-tag }}
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+    
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+  deploy-staging:
+    needs: [build, security-scan]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/develop'
+    environment: staging
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
+    
+    - name: Update kubeconfig
+      run: |
+        aws eks update-kubeconfig --region ${{ secrets.AWS_REGION }} --name ${{ secrets.EKS_CLUSTER_NAME_STAGING }}
+    
+    - name: Deploy to staging
+      run: |
+        # Update image tag in deployment
+        sed -i "s|image: swellsight/inference:.*|image: ${{ needs.build.outputs.image-tag }}|" k8s/deployment.yaml
+        
+        # Apply Kubernetes manifests
+        kubectl apply -f k8s/namespace.yaml
+        kubectl apply -f k8s/configmap.yaml
+        kubectl apply -f k8s/pvc.yaml
+        kubectl apply -f k8s/deployment.yaml
+        kubectl apply -f k8s/service.yaml
+        kubectl apply -f k8s/hpa.yaml
+        
+        # Wait for rollout to complete
+        kubectl rollout status deployment/swellsight-inference -n swellsight --timeout=300s
+    
+    - name: Run smoke tests
+      run: |
+        # Get service endpoint
+        ENDPOINT=$(kubectl get service swellsight-inference-service -n swellsight -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+        
+        # Wait for service to be ready
+        for i in {1..30}; do
+          if curl -f "http://$ENDPOINT/health"; then
+            echo "Service is ready"
+            break
+          fi
+          echo "Waiting for service... ($i/30)"
+          sleep 10
+        done
+        
+        # Run basic API tests
+        curl -f "http://$ENDPOINT/health"
+        curl -f "http://$ENDPOINT/model/info"
+
+  deploy-production:
+    needs: [build, security-scan]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
+    
+    - name: Update kubeconfig
+      run: |
+        aws eks update-kubeconfig --region ${{ secrets.AWS_REGION }} --name ${{ secrets.EKS_CLUSTER_NAME_PROD }}
+    
+    - name: Blue-Green Deployment
+      run: |
+        # Create new deployment with green suffix
+        sed -i "s|name: swellsight-inference|name: swellsight-inference-green|" k8s/deployment.yaml
+        sed -i "s|image: swellsight/inference:.*|image: ${{ needs.build.outputs.image-tag }}|" k8s/deployment.yaml
+        
+        # Deploy green version
+        kubectl apply -f k8s/namespace.yaml
+        kubectl apply -f k8s/configmap.yaml
+        kubectl apply -f k8s/pvc.yaml
+        kubectl apply -f k8s/deployment.yaml
+        
+        # Wait for green deployment to be ready
+        kubectl rollout status deployment/swellsight-inference-green -n swellsight --timeout=600s
+        
+        # Run health checks on green deployment
+        kubectl wait --for=condition=available --timeout=300s deployment/swellsight-inference-green -n swellsight
+        
+        # Switch traffic to green (update service selector)
+        kubectl patch service swellsight-inference-service -n swellsight -p '{"spec":{"selector":{"app":"swellsight-inference","version":"green"}}}'
+        
+        # Wait and verify traffic switch
+        sleep 30
+        
+        # Clean up old blue deployment if it exists
+        kubectl delete deployment swellsight-inference -n swellsight --ignore-not-found=true
+        
+        # Rename green to main
+        kubectl patch deployment swellsight-inference-green -n swellsight -p '{"metadata":{"name":"swellsight-inference"}}'
+        
+        # Apply HPA
+        kubectl apply -f k8s/hpa.yaml
+    
+    - name: Production smoke tests
+      run: |
+        # Get service endpoint
+        ENDPOINT=$(kubectl get service swellsight-inference-service -n swellsight -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+        
+        # Comprehensive health checks
+        curl -f "http://$ENDPOINT/health"
+        curl -f "http://$ENDPOINT/model/info"
+        
+        # Performance test
+        for i in {1..10}; do
+          response_time=$(curl -o /dev/null -s -w '%{time_total}' "http://$ENDPOINT/health")
+          echo "Response time: $response_time seconds"
+          if (( $(echo "$response_time > 2.0" | bc -l) )); then
+            echo "Response time too high: $response_time"
+            exit 1
+          fi
+        done
+        
+        echo "Production deployment successful!"
+
+  notify:
+    needs: [deploy-staging, deploy-production]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+    - name: Notify deployment status
+      uses: 8398a7/action-slack@v3
+      with:
+        status: ${{ job.status }}
+        channel: '#deployments'
+        text: |
+          SwellSight Inference Service deployment ${{ job.status }}
+          Branch: ${{ github.ref }}
+          Commit: ${{ github.sha }}
+          Image: ${{ needs.build.outputs.image-tag }}
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: swellsight-models-pvc
+  namespace: swellsight
+  labels:
+    app: swellsight-inference
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: efs-sc  # Use EFS for shared model storage across pods

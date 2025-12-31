@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: swellsight-config
+  namespace: swellsight
+  labels:
+    app: swellsight-inference
+data:
+  # API Configuration
+  API_HOST: "0.0.0.0"
+  API_PORT: "8000"
+  LOG_LEVEL: "INFO"
+  WORKERS: "2"
+  
+  # Model Configuration
+  MODEL_REGISTRY_PATH: "/app/models/registry"
+  
+  # Security Configuration
+  ENABLE_AUTH: "false"
+  CORS_ORIGINS: "*"
+  
+  # Performance Configuration
+  SKIP_HEALTH_CHECK: "false"
