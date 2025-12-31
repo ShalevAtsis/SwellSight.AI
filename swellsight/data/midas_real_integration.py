@@ -13,6 +13,7 @@ from dataclasses import dataclass, asdict
 
 from swellsight.data.midas_depth_extractor import MiDaSDepthExtractor, DepthExtractionResult
 from swellsight.data.real_data_loader import RealDataLoader, ManualLabelingUtility
+from swellsight.data.depth_analyzer import DepthWaveAnalyzer, WaveDetectionResult
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -55,6 +56,7 @@ class MiDaSRealDataIntegrator:
         
         self.real_data_loader = RealDataLoader(str(self.real_data_path), self.config)
         self.labeling_utility = ManualLabelingUtility(str(self.real_data_path))
+        self.depth_analyzer = DepthWaveAnalyzer(self.config.get('depth_analyzer', {}))
         
         # Paths
         self.depth_maps_path = self.real_data_path / 'depth_maps'
@@ -249,7 +251,7 @@ class MiDaSRealDataIntegrator:
     
     def _analyze_depth_map(self, depth_map: np.ndarray, image_filename: str) -> Dict[str, Any]:
         """
-        Analyze depth map to estimate wave parameters.
+        Analyze depth map to estimate wave parameters using DepthWaveAnalyzer.
         
         Args:
             depth_map: Input depth map
@@ -259,6 +261,14 @@ class MiDaSRealDataIntegrator:
             Dictionary with depth-based analysis results
         """
         try:
+            # Use the dedicated depth analyzer
+            wave_detection_result = self.depth_analyzer.analyze_waves_from_depth(
+                depth_map, image_filename
+            )
+            
+            # Extract structured parameters
+            wave_parameters = self.depth_analyzer.extract_wave_parameters(wave_detection_result)
+            
             # Basic depth statistics
             depth_stats = {
                 'min_depth': float(np.min(depth_map)),
@@ -268,61 +278,22 @@ class MiDaSRealDataIntegrator:
                 'depth_range': float(np.max(depth_map) - np.min(depth_map))
             }
             
-            # Estimate wave height from depth variation
-            # Simple approach: use depth range in water region (bottom 70% of image)
-            water_region = depth_map[int(0.3 * depth_map.shape[0]):, :]
-            water_depth_range = np.max(water_region) - np.min(water_region)
-            estimated_height = min(water_depth_range * 0.1, 5.0)  # Scale factor and cap
-            
-            # Detect breaking patterns from depth gradients
-            grad_x = np.gradient(depth_map, axis=1)
-            grad_y = np.gradient(depth_map, axis=0)
-            gradient_magnitude = np.sqrt(grad_x**2 + grad_y**2)
-            
-            # High gradient areas might indicate breaking waves
-            high_gradient_threshold = np.percentile(gradient_magnitude, 90)
-            breaking_regions = gradient_magnitude > high_gradient_threshold
-            breaking_intensity = np.sum(breaking_regions) / breaking_regions.size
-            
-            # Estimate wave direction from depth flow patterns
-            # Simplified approach: analyze horizontal gradients
-            horizontal_flow = np.mean(grad_x, axis=0)
-            left_flow = np.sum(horizontal_flow < -np.std(horizontal_flow))
-            right_flow = np.sum(horizontal_flow > np.std(horizontal_flow))
-            
-            if left_flow > right_flow * 1.5:
-                estimated_direction = 'LEFT'
-            elif right_flow > left_flow * 1.5:
-                estimated_direction = 'RIGHT'
-            else:
-                estimated_direction = 'BOTH'
-            
-            # Estimate wave type from breaking patterns and depth structure
-            if breaking_intensity > 0.15:
-                if water_depth_range > 2.0:
-                    estimated_wave_type = 'CLOSEOUT'
-                else:
-                    estimated_wave_type = 'BEACH_BREAK'
-            else:
-                if estimated_height > 1.5:
-                    estimated_wave_type = 'A_FRAME'
-                else:
-                    estimated_wave_type = 'POINT_BREAK'
-            
+            # Combine results
             analysis = {
                 'depth_statistics': depth_stats,
-                'estimated_height_meters': float(estimated_height),
-                'estimated_wave_type': estimated_wave_type,
-                'estimated_direction': estimated_direction,
+                'wave_parameters': wave_parameters,
+                'estimated_height_meters': wave_parameters['average_height_meters'],
+                'estimated_wave_type': wave_parameters['wave_type'],
+                'estimated_direction': wave_parameters['dominant_direction'],
                 'breaking_analysis': {
-                    'breaking_intensity': float(breaking_intensity),
-                    'high_gradient_threshold': float(high_gradient_threshold),
-                    'breaking_region_percentage': float(breaking_intensity * 100)
+                    'breaking_intensity': wave_parameters['breaking_intensity'],
+                    'breaking_region_percentage': wave_parameters['breaking_intensity'] * 100,
+                    'wave_count': wave_parameters['wave_count']
                 },
-                'flow_analysis': {
-                    'left_flow_strength': float(left_flow),
-                    'right_flow_strength': float(right_flow),
-                    'dominant_flow': estimated_direction
+                'confidence_analysis': {
+                    'overall_confidence': wave_parameters['confidence_score'],
+                    'detection_quality': 'high' if wave_parameters['confidence_score'] > 0.7 else 
+                                       'medium' if wave_parameters['confidence_score'] > 0.4 else 'low'
                 },
                 'analysis_timestamp': datetime.now().isoformat()
             }
@@ -362,31 +333,64 @@ class MiDaSRealDataIntegrator:
                 metrics['height_relative_error'] = float(height_relative_error)
                 metrics['height_accuracy'] = float(1.0 - min(height_relative_error, 1.0))
             
-            # Wave type validation
+            # Wave type validation - normalize to lowercase for comparison
             if 'estimated_wave_type' in depth_analysis and 'wave_type' in manual_labels:
-                estimated_type = depth_analysis['estimated_wave_type']
-                manual_type = manual_labels['wave_type']
+                estimated_type = depth_analysis['estimated_wave_type'].lower()
+                manual_type = manual_labels['wave_type'].lower()
                 
-                metrics['wave_type_match'] = float(1.0 if estimated_type == manual_type else 0.0)
+                # Handle different naming conventions
+                type_mapping = {
+                    'beach_break': 'beach_break',
+                    'point_break': 'point_break', 
+                    'a_frame': 'a_frame',
+                    'closeout': 'closeout',
+                    'flat': 'beach_break'  # Map flat to beach_break for comparison
+                }
+                
+                estimated_normalized = type_mapping.get(estimated_type, estimated_type)
+                manual_normalized = type_mapping.get(manual_type, manual_type)
+                
+                metrics['wave_type_match'] = float(1.0 if estimated_normalized == manual_normalized else 0.0)
             
-            # Direction validation
+            # Direction validation - normalize to lowercase
             if 'estimated_direction' in depth_analysis and 'direction' in manual_labels:
-                estimated_direction = depth_analysis['estimated_direction']
-                manual_direction = manual_labels['direction']
+                estimated_direction = depth_analysis['estimated_direction'].lower()
+                manual_direction = manual_labels['direction'].lower()
                 
                 metrics['direction_match'] = float(1.0 if estimated_direction == manual_direction else 0.0)
             
+            # Confidence-based metrics
+            if 'confidence_analysis' in depth_analysis:
+                confidence_score = depth_analysis['confidence_analysis'].get('overall_confidence', 0.0)
+                metrics['confidence_score'] = float(confidence_score)
+                
+                # Adjust accuracy based on confidence
+                if 'height_accuracy' in metrics:
+                    metrics['confidence_weighted_height_accuracy'] = metrics['height_accuracy'] * confidence_score
+            
             # Overall accuracy (weighted combination)
             accuracy_components = []
-            if 'height_accuracy' in metrics:
-                accuracy_components.append(metrics['height_accuracy'] * 0.5)  # 50% weight
-            if 'wave_type_match' in metrics:
-                accuracy_components.append(metrics['wave_type_match'] * 0.3)  # 30% weight
-            if 'direction_match' in metrics:
-                accuracy_components.append(metrics['direction_match'] * 0.2)  # 20% weight
+            weights = []
             
-            if accuracy_components:
-                metrics['overall_accuracy'] = float(sum(accuracy_components) / len(accuracy_components))
+            if 'height_accuracy' in metrics:
+                accuracy_components.append(metrics['height_accuracy'])
+                weights.append(0.5)  # 50% weight for height
+            
+            if 'wave_type_match' in metrics:
+                accuracy_components.append(metrics['wave_type_match'])
+                weights.append(0.3)  # 30% weight for wave type
+            
+            if 'direction_match' in metrics:
+                accuracy_components.append(metrics['direction_match'])
+                weights.append(0.2)  # 20% weight for direction
+            
+            if accuracy_components and weights:
+                # Normalize weights
+                weights = np.array(weights)
+                weights = weights / np.sum(weights)
+                
+                weighted_accuracy = np.sum(np.array(accuracy_components) * weights)
+                metrics['overall_accuracy'] = float(weighted_accuracy)
             
         except Exception as e:
             logger.error(f"Error computing validation metrics: {e}")

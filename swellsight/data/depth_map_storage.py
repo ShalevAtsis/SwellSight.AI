@@ -147,13 +147,16 @@ class DepthMapStorage:
             
             if self.storage_format == 'compressed_npy':
                 # Compress and save as .npz
+                depth_file_path = depth_file_path.with_suffix('.npz')
                 np.savez_compressed(depth_file_path, depth_map=depth_map)
             elif self.storage_format == 'gzip_pickle':
                 # Use gzip + pickle for maximum compression
-                with gzip.open(f"{depth_file_path}.pkl.gz", 'wb', compresslevel=self.compression_level) as f:
+                depth_file_path = depth_file_path.with_suffix('.pkl.gz')
+                with gzip.open(depth_file_path, 'wb', compresslevel=self.compression_level) as f:
                     pickle.dump(depth_map, f)
             elif self.storage_format == 'npy':
                 # Uncompressed numpy
+                depth_file_path = depth_file_path.with_suffix('.npy')
                 np.save(depth_file_path, depth_map)
             else:
                 raise ValueError(f"Unsupported storage format: {self.storage_format}")
@@ -163,6 +166,10 @@ class DepthMapStorage:
                 compressed_size = depth_file_path.stat().st_size
                 metadata.compression_ratio = original_size / compressed_size if compressed_size > 0 else 1.0
                 metadata.file_size_bytes = compressed_size
+            else:
+                # Fallback if file doesn't exist
+                metadata.compression_ratio = 1.0
+                metadata.file_size_bytes = original_size
             
             # Calculate checksum if enabled
             if self.enable_checksums:

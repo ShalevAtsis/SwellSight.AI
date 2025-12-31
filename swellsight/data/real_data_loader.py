@@ -144,7 +144,7 @@ class RealDataLoader:
     
     def load_manual_labels(self, labels_file: Optional[str] = None) -> List[Dict[str, Any]]:
         """
-        Load manual labels from CSV file.
+        Load manual labels from JSON file.
         
         Args:
             labels_file: Optional path to labels file
@@ -153,7 +153,17 @@ class RealDataLoader:
             List of label dictionaries
         """
         if labels_file is None:
-            labels_file = self.labels_path / 'manual_labels.csv'
+            # Try JSON file first, then CSV as fallback
+            json_file = self.labels_path / 'labels.json'
+            csv_file = self.labels_path / 'manual_labels.csv'
+            
+            if json_file.exists():
+                labels_file = json_file
+            elif csv_file.exists():
+                labels_file = csv_file
+            else:
+                logger.warning(f"Labels file not found: {json_file} or {csv_file}")
+                return []
         else:
             labels_file = Path(labels_file)
         
@@ -162,21 +172,45 @@ class RealDataLoader:
             return []
         
         labels = []
-        with open(labels_file, 'r', newline='') as csvfile:
-            reader = csv.DictReader(csvfile)
-            for row in reader:
-                # Convert string values to appropriate types
+        
+        # Handle JSON format
+        if labels_file.suffix == '.json':
+            with open(labels_file, 'r') as f:
+                labels_data = json.load(f)
+            
+            for image_filename, label_data in labels_data.items():
                 label = {
-                    'image_filename': row['image_filename'],
-                    'height_meters': float(row['height_meters']),
-                    'wave_type': row['wave_type'],
-                    'direction': row['direction'],
-                    'labeler_id': row.get('labeler_id', 'unknown'),
-                    'confidence': float(row.get('confidence', 1.0)),
-                    'notes': row.get('notes', ''),
-                    'label_timestamp': row.get('label_timestamp', '')
+                    'image_filename': image_filename,
+                    'height_meters': float(label_data['height_meters']),
+                    'wave_type': label_data['wave_type'],
+                    'direction': label_data['direction'],
+                    'confidence': label_data.get('confidence', 'high'),
+                    'notes': label_data.get('notes', ''),
+                    'data_key': label_data.get('data_key', 0),
+                    'label_timestamp': datetime.now().isoformat()
                 }
                 labels.append(label)
+        
+        # Handle CSV format (fallback)
+        elif labels_file.suffix == '.csv':
+            with open(labels_file, 'r', newline='') as csvfile:
+                reader = csv.DictReader(csvfile)
+                for row in reader:
+                    # Convert string values to appropriate types
+                    label = {
+                        'image_filename': row['image_filename'],
+                        'height_meters': float(row['height_meters']),
+                        'wave_type': row['wave_type'],
+                        'direction': row['direction'],
+                        'labeler_id': row.get('labeler_id', 'unknown'),
+                        'confidence': row.get('confidence', 'high'),
+                        'notes': row.get('notes', ''),
+                        'label_timestamp': row.get('label_timestamp', '')
+                    }
+                    labels.append(label)
+        else:
+            logger.error(f"Unsupported labels file format: {labels_file}")
+            return []
         
         logger.info(f"Loaded {len(labels)} manual labels from {labels_file}")
         return labels

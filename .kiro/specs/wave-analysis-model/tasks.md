@@ -199,27 +199,27 @@ This implementation plan converts the multi-task deep learning design into discr
     - Implement depth map caching and storage optimization
     - _Requirements: 2.1, 2.2, 7.1, 7.2, 7.3, 7.4_
 
-  - [ ] 14.2 Write property tests for MiDaS depth extraction
-    - **Property 22: Depth Map Generation Consistency** - For any valid beach image, MiDaS should produce a depth map with same spatial dimensions and valid depth values
-    - **Property 23: Depth Quality Validation** - For any generated depth map, quality metrics should be within acceptable ranges for beach scene analysis
-    - **Property 24: Batch Processing Consistency** - For any batch of images, individual vs batch processing should produce identical results
+  - [x] 14.2 Write property tests for MiDaS depth extraction
+    - **Property 22: Depth Map Generation Consistency** ✅ PASSED - For any valid beach image, MiDaS should produce a depth map with same spatial dimensions and valid depth values
+    - **Property 23: Depth Quality Validation** ✅ PASSED - For any generated depth map, quality metrics should be within acceptable ranges for beach scene analysis
+    - **Property 24: Batch Processing Consistency** ✅ PASSED - For any batch of images, individual vs batch processing should produce identical results
     - **Validates: Requirements 2.1, 2.2, 7.1**
 
-  - [ ] 14.3 Integrate with real data labels and validation
+  - [x] 14.3 Integrate with real data labels and validation
     - Load real image labels from data/real/labels/labels.json
     - Create correspondence between real images, depth maps, and manual labels
     - Implement validation pipeline for depth-based wave parameter estimation
     - Add statistical analysis of depth quality across different image conditions
     - _Requirements: 2.6, 2.7, 4.1, 12.3_
 
-  - [ ] 14.4 Implement depth map storage and retrieval system
+  - [x] 14.4 Implement depth map storage and retrieval system
     - Create efficient storage format for depth maps (compressed numpy arrays)
     - Implement metadata tracking for depth extraction parameters
     - Add depth map versioning for different MiDaS model versions
     - Create utilities for depth map visualization and debugging
     - _Requirements: 8.1, 8.2, 10.2_
 
-  - [ ] 14.5 Commit and push MiDaS integration changes
+  - [x] 14.5 Commit and push MiDaS integration changes
     - Commit and push changes with message: "feat: implement MiDaS depth extraction pipeline with HuggingFace integration, quality validation, and storage system"
 
 - [ ] 15. Implement ControlNet synthetic image generation
