@@ -9,6 +9,7 @@ import logging
 from dataclasses import dataclass
 import random
 from datetime import datetime
+import cv2
 
 try:
     from diffusers import StableDiffusionControlNetPipeline, ControlNetModel
@@ -104,6 +105,295 @@ class SyntheticGenerationResult:
     augmentation_params: AugmentationParameters
     generation_metadata: Dict[str, Any]
     original_image_path: Optional[str] = None
+
+
+class PromptEngineeringSystem:
+    """Advanced prompt engineering system for beach scene generation."""
+    
+    def __init__(self):
+        """Initialize the prompt engineering system."""
+        self.base_prompts = {
+            'beach_scene': "photorealistic beach camera view of ocean waves",
+            'quality_modifiers': ["high resolution", "detailed water texture", "natural beach scene", "professional photography"],
+            'negative_base': ["blurry", "low quality", "artificial", "cartoon", "oversaturated", "unrealistic colors"]
+        }
+        
+        # Weather condition templates
+        self.weather_templates = {
+            'clear': "clear blue sky, bright sunlight, excellent visibility",
+            'partly_cloudy': "partly cloudy sky, scattered white clouds, natural lighting",
+            'overcast': "overcast gray sky, diffused lighting, moody atmosphere",
+            'stormy': "dramatic stormy clouds, dark sky, turbulent weather"
+        }
+        
+        # Wave characteristic templates
+        self.wave_templates = {
+            'small': "small gentle waves, calm water surface, peaceful ocean",
+            'medium': "medium waves, moderate surf conditions, active water",
+            'large': "large powerful waves, dramatic surf, energetic ocean"
+        }
+        
+        # Breaking behavior templates
+        self.breaking_templates = {
+            'spilling': "gently spilling white foam, soft wave breaks, smooth water texture",
+            'plunging': "dramatic plunging waves with spray, powerful breaks, dynamic water action",
+            'collapsing': "collapsing wave crests, irregular breaks, choppy water surface",
+            'surging': "surging waves rushing up beach, continuous water movement"
+        }
+        
+        # Lighting condition templates
+        self.lighting_templates = {
+            'bright': "bright midday sunlight, strong shadows, high contrast",
+            'golden': "golden hour lighting, warm tones, soft shadows",
+            'low': "low angle dramatic lighting, long shadows, atmospheric",
+            'twilight': "twilight lighting, subtle illumination, moody atmosphere"
+        }
+        
+        # Atmospheric condition templates
+        self.atmospheric_templates = {
+            'clear': "crystal clear atmosphere, sharp details, vivid colors",
+            'hazy': "atmospheric haze, reduced visibility, soft focus background",
+            'foggy': "morning fog, misty atmosphere, ethereal lighting",
+            'humid': "humid conditions, soft air, gentle atmosphere"
+        }
+        
+        logger.info("Initialized PromptEngineeringSystem")
+    
+    def generate_prompt(self, params: AugmentationParameters) -> Tuple[str, str]:
+        """
+        Generate optimized prompt and negative prompt from augmentation parameters.
+        
+        Args:
+            params: Augmentation parameters for scene generation
+            
+        Returns:
+            Tuple of (main_prompt, negative_prompt)
+        """
+        prompt_parts = [self.base_prompts['beach_scene']]
+        
+        # Add wave characteristics
+        if params.dominant_wave_height_m < 1.0:
+            prompt_parts.append(self.wave_templates['small'])
+        elif params.dominant_wave_height_m < 2.5:
+            prompt_parts.append(self.wave_templates['medium'])
+        else:
+            prompt_parts.append(self.wave_templates['large'])
+        
+        # Add breaking behavior
+        if params.breaking_type in self.breaking_templates:
+            prompt_parts.append(self.breaking_templates[params.breaking_type])
+        
+        # Add lighting conditions with improved logic
+        lighting_prompt = self._generate_lighting_prompt(params)
+        if lighting_prompt:
+            prompt_parts.append(lighting_prompt)
+        
+        # Add weather conditions
+        if params.sky_clarity in self.weather_templates:
+            prompt_parts.append(self.weather_templates[params.sky_clarity])
+        
+        # Add atmospheric effects
+        atmospheric_prompt = self._generate_atmospheric_prompt(params)
+        if atmospheric_prompt:
+            prompt_parts.append(atmospheric_prompt)
+        
+        # Add scene elements
+        scene_elements = self._generate_scene_elements(params)
+        if scene_elements:
+            prompt_parts.extend(scene_elements)
+        
+        # Add camera perspective details
+        camera_prompt = self._generate_camera_perspective(params)
+        if camera_prompt:
+            prompt_parts.append(camera_prompt)
+        
+        # Add water surface texture details
+        texture_prompt = self._generate_texture_prompt(params)
+        if texture_prompt:
+            prompt_parts.append(texture_prompt)
+        
+        # Add quality modifiers
+        prompt_parts.extend(self.base_prompts['quality_modifiers'])
+        
+        # Create negative prompt
+        negative_parts = self._generate_negative_prompt(params)
+        
+        # Construct final prompts
+        main_prompt = ", ".join(prompt_parts)
+        negative_prompt = ", ".join(negative_parts)
+        
+        return main_prompt, negative_prompt
+    
+    def _generate_lighting_prompt(self, params: AugmentationParameters) -> str:
+        """Generate lighting-specific prompt based on sun elevation and intensity."""
+        if params.sun_elevation_deg > 60:
+            return self.lighting_templates['bright']
+        elif params.sun_elevation_deg > 30:
+            return self.lighting_templates['golden']
+        elif params.sun_elevation_deg > 10:
+            return self.lighting_templates['low']
+        else:
+            return self.lighting_templates['twilight']
+    
+    def _generate_atmospheric_prompt(self, params: AugmentationParameters) -> str:
+        """Generate atmospheric condition prompt."""
+        conditions = []
+        
+        if params.haze_density > 0.5:
+            conditions.append("atmospheric haze, reduced visibility, soft focus background")
+        
+        if params.fog_layer_height_m > 0:
+            conditions.append("morning fog, misty atmosphere, ethereal lighting")
+        
+        if params.rain_present:
+            conditions.append("rain streaks, wet surfaces, stormy conditions")
+        
+        if params.humidity_level > 0.7:
+            conditions.append("humid atmosphere, soft air quality")
+        
+        return ", ".join(conditions) if conditions else ""
+    
+    def _generate_scene_elements(self, params: AugmentationParameters) -> List[str]:
+        """Generate scene element prompts based on parameters."""
+        elements = []
+        
+        # People
+        if params.people_count > 0:
+            if params.people_count <= 3:
+                elements.append("few people on beach, human scale reference")
+            elif params.people_count <= 10:
+                elements.append("several people on beach, active beach scene")
+            else:
+                elements.append("crowded beach, many people, busy coastal scene")
+        
+        # Surfboards
+        if params.surfboard_present:
+            elements.append("surfboards visible, surf culture elements")
+        
+        # Birds
+        if params.birds_count > 10:
+            elements.append("seabirds flying, coastal wildlife, natural beach ecosystem")
+        
+        return elements
+    
+    def _generate_camera_perspective(self, params: AugmentationParameters) -> str:
+        """Generate camera perspective prompt."""
+        if params.camera_height_m > 30:
+            return "elevated aerial perspective, wide coastal view"
+        elif params.camera_height_m > 10:
+            return "elevated beach camera angle, comprehensive surf view"
+        else:
+            return "ground level beach perspective, intimate surf view"
+    
+    def _generate_texture_prompt(self, params: AugmentationParameters) -> str:
+        """Generate water surface texture prompt."""
+        if params.surface_roughness > 0.7:
+            return "rough choppy water surface, textured waves"
+        elif params.surface_roughness > 0.3:
+            return "moderate water texture, natural wave patterns"
+        else:
+            return "smooth glassy water surface, minimal texture"
+    
+    def _generate_negative_prompt(self, params: AugmentationParameters) -> List[str]:
+        """Generate negative prompt based on parameters."""
+        negative_parts = list(self.base_prompts['negative_base'])
+        
+        # Add parameter-specific negative elements
+        if params.compression_artifacts > 0.5:
+            negative_parts.extend(["compression artifacts", "pixelated", "blocky"])
+        
+        if params.motion_blur_kernel_size > 10:
+            negative_parts.extend(["excessive motion blur", "unclear details"])
+        
+        if params.sensor_noise_level > 0.05:
+            negative_parts.extend(["excessive noise", "grainy", "poor image quality"])
+        
+        # Add weather-specific negative prompts
+        if params.sky_clarity == "clear":
+            negative_parts.extend(["cloudy", "overcast", "stormy"])
+        elif params.sky_clarity == "stormy":
+            negative_parts.extend(["bright sunny", "clear blue sky"])
+        
+        return negative_parts
+    
+    def validate_prompt(self, prompt: str) -> float:
+        """
+        Validate and score prompt quality.
+        
+        Args:
+            prompt: Generated prompt to validate
+            
+        Returns:
+            Quality score between 0.0 and 1.0
+        """
+        score = 0.0
+        
+        # Check for essential beach scene elements
+        essential_keywords = ['beach', 'ocean', 'waves', 'water']
+        for keyword in essential_keywords:
+            if keyword in prompt.lower():
+                score += 0.2
+        
+        # Check for quality descriptors
+        quality_keywords = ['photorealistic', 'high resolution', 'detailed', 'professional']
+        for keyword in quality_keywords:
+            if keyword in prompt.lower():
+                score += 0.1
+        
+        # Check prompt length (optimal range)
+        word_count = len(prompt.split())
+        if 20 <= word_count <= 60:
+            score += 0.2
+        elif 10 <= word_count <= 80:
+            score += 0.1
+        
+        # Penalize overly repetitive prompts
+        words = prompt.lower().split()
+        unique_words = set(words)
+        if len(unique_words) / len(words) > 0.7:
+            score += 0.1
+        
+        # Check for balanced content
+        if any(weather in prompt.lower() for weather in ['clear', 'cloudy', 'stormy']):
+            score += 0.05
+        
+        if any(lighting in prompt.lower() for lighting in ['bright', 'golden', 'dramatic', 'twilight']):
+            score += 0.05
+        
+        return min(score, 1.0)
+    
+    def optimize_prompt_for_controlnet(self, prompt: str, negative_prompt: str) -> Tuple[str, str]:
+        """
+        Optimize prompts specifically for ControlNet generation.
+        
+        Args:
+            prompt: Main prompt to optimize
+            negative_prompt: Negative prompt to optimize
+            
+        Returns:
+            Tuple of (optimized_prompt, optimized_negative_prompt)
+        """
+        # Ensure ControlNet-specific keywords are present
+        controlnet_keywords = ["depth", "structure", "composition", "perspective"]
+        
+        prompt_words = prompt.split(", ")
+        
+        # Add depth-related terms if missing
+        if not any(keyword in prompt.lower() for keyword in controlnet_keywords):
+            prompt_words.insert(1, "depth-guided composition")
+        
+        # Ensure negative prompt includes ControlNet-specific issues
+        negative_words = negative_prompt.split(", ")
+        controlnet_negatives = ["flat", "no depth", "poor composition"]
+        
+        for neg in controlnet_negatives:
+            if neg not in negative_prompt.lower():
+                negative_words.append(neg)
+        
+        optimized_prompt = ", ".join(prompt_words)
+        optimized_negative = ", ".join(negative_words)
+        
+        return optimized_prompt, optimized_negative
 
 
 class AugmentationParameterSystem:
@@ -313,18 +603,25 @@ class ControlNetSyntheticGenerator:
     
     Uses Stable Diffusion with ControlNet depth conditioning to generate synthetic
     beach images from MiDaS-extracted depth maps with comprehensive augmentation.
+    Supports batch generation with consistent quality and style, and implements
+    fallback generation for environments without GPU/ControlNet.
     """
     
     def __init__(self, controlnet_model: str = "lllyasviel/sd-controlnet-depth", 
-                 device: Optional[str] = None):
+                 device: Optional[str] = None, batch_size: int = 1,
+                 enable_memory_efficient_attention: bool = True):
         """
         Initialize the ControlNet synthetic generator.
         
         Args:
             controlnet_model: HuggingFace ControlNet model name
             device: Device to run inference on ('cuda', 'cpu', or None for auto-detect)
+            batch_size: Default batch size for generation
+            enable_memory_efficient_attention: Enable memory efficient attention for GPU
         """
         self.controlnet_model = controlnet_model
+        self.batch_size = batch_size
+        self.enable_memory_efficient_attention = enable_memory_efficient_attention
         
         # Auto-detect device if not specified
         if device is None:
@@ -334,9 +631,13 @@ class ControlNetSyntheticGenerator:
         
         logger.info(f"Initializing ControlNet generator with model: {controlnet_model}")
         logger.info(f"Using device: {self.device}")
+        logger.info(f"Default batch size: {batch_size}")
         
         # Initialize augmentation parameter system
         self.augmentation_system = AugmentationParameterSystem()
+        
+        # Initialize prompt engineering system
+        self.prompt_engineer = PromptEngineeringSystem()
         
         # Initialize ControlNet pipeline if diffusers is available
         if DIFFUSERS_AVAILABLE:
@@ -351,9 +652,17 @@ class ControlNetSyntheticGenerator:
         else:
             self.use_controlnet = False
             logger.info("Using fallback synthetic image generation")
+        
+        # Generation statistics
+        self.generation_stats = {
+            'total_generated': 0,
+            'successful_generations': 0,
+            'failed_generations': 0,
+            'fallback_generations': 0
+        }
     
     def _initialize_controlnet_pipeline(self):
-        """Initialize the ControlNet pipeline."""
+        """Initialize the ControlNet pipeline with optimizations."""
         # Load ControlNet model
         controlnet = ControlNetModel.from_pretrained(
             self.controlnet_model,
@@ -371,16 +680,36 @@ class ControlNetSyntheticGenerator:
         
         self.pipeline = self.pipeline.to(self.device)
         
-        # Enable memory efficient attention if available
-        if hasattr(self.pipeline, "enable_attention_slicing"):
+        # Enable memory efficient optimizations
+        if self.enable_memory_efficient_attention and hasattr(self.pipeline, "enable_attention_slicing"):
             self.pipeline.enable_attention_slicing()
+            logger.info("Enabled attention slicing for memory efficiency")
         
         if hasattr(self.pipeline, "enable_model_cpu_offload") and self.device == "cuda":
             self.pipeline.enable_model_cpu_offload()
+            logger.info("Enabled model CPU offload for memory efficiency")
+        
+        # Enable xformers if available for better performance
+        try:
+            self.pipeline.enable_xformers_memory_efficient_attention()
+            logger.info("Enabled xformers memory efficient attention")
+        except Exception as e:
+            logger.debug(f"xformers not available: {e}")
+        
+        # Set pipeline to evaluation mode
+        self.pipeline.unet.eval()
+        self.pipeline.vae.eval()
+        if hasattr(self.pipeline, 'text_encoder'):
+            self.pipeline.text_encoder.eval()
     
     def generate_synthetic_image(self, depth_map: np.ndarray, 
                                augmentation_params: AugmentationParameters,
-                               prompt: Optional[str] = None) -> SyntheticGenerationResult:
+                               prompt: Optional[str] = None,
+                               negative_prompt: Optional[str] = None,
+                               num_inference_steps: int = 20,
+                               guidance_scale: float = 7.5,
+                               controlnet_conditioning_scale: float = 1.0,
+                               seed: Optional[int] = None) -> SyntheticGenerationResult:
         """
         Generate synthetic beach camera image from depth map and augmentation parameters.
         
@@ -388,31 +717,66 @@ class ControlNetSyntheticGenerator:
             depth_map: Input depth map from MiDaS
             augmentation_params: Comprehensive augmentation parameters
             prompt: Optional custom prompt (auto-generated if None)
+            negative_prompt: Optional custom negative prompt (auto-generated if None)
+            num_inference_steps: Number of denoising steps
+            guidance_scale: Classifier-free guidance scale
+            controlnet_conditioning_scale: ControlNet conditioning strength
+            seed: Random seed for reproducible generation
         
         Returns:
             SyntheticGenerationResult with generated image and metadata
         """
         try:
-            # Generate prompt from augmentation parameters if not provided
-            if prompt is None:
-                prompt = self._generate_prompt_from_parameters(augmentation_params)
+            self.generation_stats['total_generated'] += 1
             
-            logger.debug(f"Generating synthetic image with prompt: {prompt[:100]}...")
+            # Generate prompts from augmentation parameters if not provided
+            if prompt is None or negative_prompt is None:
+                generated_prompt, generated_negative = self.prompt_engineer.generate_prompt(augmentation_params)
+                if prompt is None:
+                    prompt = generated_prompt
+                if negative_prompt is None:
+                    negative_prompt = generated_negative
+            
+            # Optimize prompts for ControlNet if using ControlNet
+            if self.use_controlnet:
+                prompt, negative_prompt = self.prompt_engineer.optimize_prompt_for_controlnet(prompt, negative_prompt)
+            
+            # Validate prompt quality
+            prompt_quality = self.prompt_engineer.validate_prompt(prompt)
+            
+            logger.debug(f"Generating synthetic image with prompt quality: {prompt_quality:.3f}")
+            logger.debug(f"Prompt: {prompt[:100]}...")
             
             # Generate image using ControlNet or fallback
             if self.use_controlnet:
-                synthetic_image = self._generate_with_controlnet(depth_map, prompt, augmentation_params)
+                synthetic_image = self._generate_with_controlnet(
+                    depth_map, prompt, negative_prompt, augmentation_params,
+                    num_inference_steps, guidance_scale, controlnet_conditioning_scale, seed
+                )
             else:
                 synthetic_image = self._generate_fallback(depth_map, augmentation_params)
+                self.generation_stats['fallback_generations'] += 1
+            
+            # Validate generated image
+            if not self._validate_generated_image(synthetic_image):
+                raise ValueError("Generated image failed validation")
             
             # Create generation metadata
             generation_metadata = {
                 'controlnet_model': self.controlnet_model,
                 'device': self.device,
                 'prompt': prompt,
+                'negative_prompt': negative_prompt,
+                'prompt_quality_score': prompt_quality,
                 'use_controlnet': self.use_controlnet,
                 'depth_map_shape': depth_map.shape,
-                'generation_timestamp': datetime.now().isoformat()
+                'generation_timestamp': datetime.now().isoformat(),
+                'num_inference_steps': num_inference_steps,
+                'guidance_scale': guidance_scale,
+                'controlnet_conditioning_scale': controlnet_conditioning_scale,
+                'seed': seed,
+                'image_shape': synthetic_image.shape,
+                'image_dtype': str(synthetic_image.dtype)
             }
             
             result = SyntheticGenerationResult(
@@ -422,22 +786,30 @@ class ControlNetSyntheticGenerator:
                 generation_metadata=generation_metadata
             )
             
+            self.generation_stats['successful_generations'] += 1
             logger.debug("Successfully generated synthetic image")
             
             return result
             
         except Exception as e:
+            self.generation_stats['failed_generations'] += 1
             logger.error(f"Failed to generate synthetic image: {e}")
             raise
     
     def batch_generate(self, depth_maps: List[np.ndarray],
-                      param_sets: List[AugmentationParameters]) -> List[SyntheticGenerationResult]:
+                      param_sets: List[AugmentationParameters],
+                      batch_size: Optional[int] = None,
+                      consistent_seed: bool = False,
+                      base_seed: int = 42) -> List[SyntheticGenerationResult]:
         """
-        Generate multiple synthetic images in batch.
+        Generate multiple synthetic images in batch with consistent quality and style.
         
         Args:
             depth_maps: List of input depth maps
             param_sets: List of augmentation parameters for each depth map
+            batch_size: Override default batch size for this generation
+            consistent_seed: Use consistent seeding for style consistency
+            base_seed: Base seed for consistent generation
         
         Returns:
             List of SyntheticGenerationResult objects
@@ -445,134 +817,84 @@ class ControlNetSyntheticGenerator:
         if len(depth_maps) != len(param_sets):
             raise ValueError("Number of depth maps must match number of parameter sets")
         
-        logger.info(f"Starting batch generation for {len(depth_maps)} images")
+        if batch_size is None:
+            batch_size = self.batch_size
+        
+        logger.info(f"Starting batch generation for {len(depth_maps)} images (batch_size={batch_size})")
         
         results = []
         failed_count = 0
         
-        for i, (depth_map, params) in enumerate(zip(depth_maps, param_sets)):
-            try:
-                result = self.generate_synthetic_image(depth_map, params)
-                results.append(result)
-                
-                if (i + 1) % 5 == 0:
-                    logger.info(f"Generated {i + 1}/{len(depth_maps)} synthetic images")
+        # Process in batches for memory efficiency
+        for batch_start in range(0, len(depth_maps), batch_size):
+            batch_end = min(batch_start + batch_size, len(depth_maps))
+            batch_depth_maps = depth_maps[batch_start:batch_end]
+            batch_param_sets = param_sets[batch_start:batch_end]
+            
+            logger.debug(f"Processing batch {batch_start//batch_size + 1}: items {batch_start}-{batch_end-1}")
+            
+            # Generate images in current batch
+            for i, (depth_map, params) in enumerate(zip(batch_depth_maps, batch_param_sets)):
+                try:
+                    # Use consistent seeding if requested
+                    seed = None
+                    if consistent_seed:
+                        seed = base_seed + batch_start + i
                     
-            except Exception as e:
-                logger.warning(f"Failed to generate image {i}: {e}")
-                failed_count += 1
-                continue
+                    result = self.generate_synthetic_image(
+                        depth_map, params, seed=seed
+                    )
+                    results.append(result)
+                    
+                    if (len(results)) % 5 == 0:
+                        logger.info(f"Generated {len(results)}/{len(depth_maps)} synthetic images")
+                        
+                except Exception as e:
+                    logger.warning(f"Failed to generate image {batch_start + i}: {e}")
+                    failed_count += 1
+                    continue
+            
+            # Clear GPU cache between batches if using CUDA
+            if self.device == "cuda" and torch.cuda.is_available():
+                torch.cuda.empty_cache()
         
-        logger.info(f"Batch generation completed: {len(results)} successful, {failed_count} failed")
+        success_rate = len(results) / len(depth_maps) if len(depth_maps) > 0 else 0
+        logger.info(f"Batch generation completed: {len(results)} successful, {failed_count} failed (success rate: {success_rate:.2%})")
         
         return results
     
-    def _generate_prompt_from_parameters(self, params: AugmentationParameters) -> str:
-        """Generate ControlNet prompt from augmentation parameters."""
-        prompt_parts = []
-        
-        # Base scene description
-        prompt_parts.append("photorealistic beach camera view of ocean waves")
-        
-        # Wave characteristics
-        if params.dominant_wave_height_m < 1.0:
-            prompt_parts.append("small gentle waves")
-        elif params.dominant_wave_height_m < 2.0:
-            prompt_parts.append("medium waves")
-        else:
-            prompt_parts.append("large powerful waves")
-        
-        # Breaking behavior
-        if params.breaking_type == "spilling":
-            prompt_parts.append("gently spilling white foam")
-        elif params.breaking_type == "plunging":
-            prompt_parts.append("dramatic plunging waves with spray")
-        elif params.breaking_type == "collapsing":
-            prompt_parts.append("collapsing wave crests")
-        else:  # surging
-            prompt_parts.append("surging waves rushing up beach")
-        
-        # Lighting conditions
-        if params.sun_elevation_deg > 60:
-            prompt_parts.append("bright midday sunlight")
-        elif params.sun_elevation_deg > 30:
-            prompt_parts.append("golden hour lighting")
-        else:
-            prompt_parts.append("low angle dramatic lighting")
-        
-        # Weather conditions
-        if params.sky_clarity == "clear":
-            prompt_parts.append("clear blue sky")
-        elif params.sky_clarity == "partly_cloudy":
-            prompt_parts.append("partly cloudy sky")
-        elif params.sky_clarity == "overcast":
-            prompt_parts.append("overcast gray sky")
-        else:  # stormy
-            prompt_parts.append("dramatic stormy clouds")
-        
-        # Atmospheric effects
-        if params.haze_density > 0.5:
-            prompt_parts.append("atmospheric haze")
-        
-        if params.rain_present:
-            prompt_parts.append("rain streaks")
-        
-        # Scene elements
-        if params.people_count > 0:
-            prompt_parts.append(f"people on beach")
-        
-        if params.surfboard_present:
-            prompt_parts.append("surfboards")
-        
-        if params.birds_count > 10:
-            prompt_parts.append("seabirds flying")
-        
-        # Quality modifiers
-        prompt_parts.extend([
-            "high resolution",
-            "detailed water texture",
-            "natural beach scene",
-            "professional photography"
-        ])
-        
-        # Negative prompt elements to avoid
-        negative_elements = [
-            "blurry", "low quality", "artificial", "cartoon",
-            "oversaturated", "unrealistic colors"
-        ]
-        
-        prompt = ", ".join(prompt_parts)
-        negative_prompt = ", ".join(negative_elements)
-        
-        return f"{prompt} | negative: {negative_prompt}"
-    
     def _generate_with_controlnet(self, depth_map: np.ndarray, prompt: str, 
-                                params: AugmentationParameters) -> np.ndarray:
+                                negative_prompt: str, params: AugmentationParameters,
+                                num_inference_steps: int = 20, guidance_scale: float = 7.5,
+                                controlnet_conditioning_scale: float = 1.0, 
+                                seed: Optional[int] = None) -> np.ndarray:
         """Generate image using ControlNet pipeline."""
         # Prepare depth map for ControlNet
         depth_image = self._prepare_depth_for_controlnet(depth_map)
         
-        # Split prompt and negative prompt
-        if " | negative: " in prompt:
-            main_prompt, negative_prompt = prompt.split(" | negative: ", 1)
-        else:
-            main_prompt = prompt
-            negative_prompt = "blurry, low quality, artificial"
+        # Set up generator for reproducible results
+        generator = None
+        if seed is not None:
+            generator = torch.Generator(device=self.device).manual_seed(seed)
         
         # Generate image
         with torch.no_grad():
             result = self.pipeline(
-                prompt=main_prompt,
+                prompt=prompt,
                 negative_prompt=negative_prompt,
                 image=depth_image,
-                num_inference_steps=20,
-                guidance_scale=7.5,
-                controlnet_conditioning_scale=1.0,
-                generator=torch.Generator(device=self.device).manual_seed(42)
+                num_inference_steps=num_inference_steps,
+                guidance_scale=guidance_scale,
+                controlnet_conditioning_scale=controlnet_conditioning_scale,
+                generator=generator,
+                return_dict=True
             )
         
         # Convert to numpy array
         synthetic_image = np.array(result.images[0])
+        
+        # Apply post-processing based on augmentation parameters
+        synthetic_image = self._apply_post_processing(synthetic_image, params)
         
         return synthetic_image
     
@@ -648,6 +970,116 @@ class ControlNetSyntheticGenerator:
         
         return rgb_array.astype(np.uint8)
     
+    def _apply_post_processing(self, image: np.ndarray, params: AugmentationParameters) -> np.ndarray:
+        """Apply post-processing effects based on augmentation parameters."""
+        processed_image = image.copy().astype(np.float32)
+        
+        # Apply sensor noise
+        if params.sensor_noise_level > 0:
+            noise = np.random.normal(0, params.sensor_noise_level * 255, processed_image.shape)
+            processed_image = processed_image + noise
+        
+        # Apply motion blur
+        if params.motion_blur_kernel_size > 0:
+            kernel_size = params.motion_blur_kernel_size
+            kernel = np.ones((kernel_size, kernel_size)) / (kernel_size * kernel_size)
+            for channel in range(3):
+                processed_image[:, :, channel] = cv2.filter2D(
+                    processed_image[:, :, channel], -1, kernel
+                )
+        
+        # Apply compression artifacts simulation
+        if params.compression_artifacts > 0.1:
+            # Simulate JPEG compression artifacts
+            quality = int(100 * (1 - params.compression_artifacts))
+            quality = max(10, min(95, quality))
+            
+            # Convert to PIL for JPEG simulation
+            pil_image = Image.fromarray(np.clip(processed_image, 0, 255).astype(np.uint8))
+            
+            # Save and reload with JPEG compression
+            import io
+            buffer = io.BytesIO()
+            pil_image.save(buffer, format='JPEG', quality=quality)
+            buffer.seek(0)
+            compressed_image = Image.open(buffer)
+            processed_image = np.array(compressed_image).astype(np.float32)
+        
+        # Apply chromatic aberration
+        if params.chromatic_aberration > 0:
+            shift = int(params.chromatic_aberration * 5)  # Max 5 pixel shift
+            if shift > 0:
+                # Shift red and blue channels slightly
+                processed_image[:, :shift, 0] = processed_image[:, shift:2*shift, 0]  # Red shift
+                processed_image[:, -shift:, 2] = processed_image[:, -2*shift:-shift, 2]  # Blue shift
+        
+        # Clip values and convert back to uint8
+        processed_image = np.clip(processed_image, 0, 255).astype(np.uint8)
+        
+        return processed_image
+    
+    def _validate_generated_image(self, image: np.ndarray) -> bool:
+        """Validate that generated image meets quality requirements."""
+        try:
+            # Check basic properties
+            if not isinstance(image, np.ndarray):
+                return False
+            
+            if len(image.shape) != 3 or image.shape[2] != 3:
+                return False
+            
+            if image.dtype != np.uint8:
+                return False
+            
+            # Check value ranges
+            if np.any(image < 0) or np.any(image > 255):
+                return False
+            
+            # Check for completely black or white images
+            if np.all(image == 0) or np.all(image == 255):
+                return False
+            
+            # Check for reasonable variation
+            std_dev = np.std(image)
+            if std_dev < 5:  # Too uniform
+                return False
+            
+            # Check image dimensions are reasonable
+            height, width = image.shape[:2]
+            if height < 256 or width < 256:
+                return False
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error validating image: {e}")
+            return False
+    
+    def get_generation_statistics(self) -> Dict[str, Any]:
+        """Get generation statistics and performance metrics."""
+        stats = self.generation_stats.copy()
+        
+        if stats['total_generated'] > 0:
+            stats['success_rate'] = stats['successful_generations'] / stats['total_generated']
+            stats['failure_rate'] = stats['failed_generations'] / stats['total_generated']
+            stats['fallback_rate'] = stats['fallback_generations'] / stats['total_generated']
+        else:
+            stats['success_rate'] = 0.0
+            stats['failure_rate'] = 0.0
+            stats['fallback_rate'] = 0.0
+        
+        return stats
+    
+    def reset_statistics(self):
+        """Reset generation statistics."""
+        self.generation_stats = {
+            'total_generated': 0,
+            'successful_generations': 0,
+            'failed_generations': 0,
+            'fallback_generations': 0
+        }
+        logger.info("Reset generation statistics")
+
     def _prepare_depth_for_controlnet(self, depth_map: np.ndarray) -> Image.Image:
         """Prepare depth map for ControlNet input."""
         # Normalize depth map to 0-255 range
