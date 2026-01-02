@@ -1,0 +1,58 @@
+{
+  "_comment": "SwellSight End-to-End Pipeline Configuration Example",
+  "_description": "This configuration file demonstrates all available options for the pipeline",
+  
+  "real_data_path": "data/real",
+  "synthetic_data_path": "data/synthetic",
+  "metadata_path": "data/metadata", 
+  "output_path": "data/pipeline_output",
+  
+  "_models_section": "Model Configuration",
+  "midas_model": "Intel/dpt-large",
+  "midas_device": null,
+  "controlnet_model": "lllyasviel/sd-controlnet-depth",
+  
+  "_generation_section": "Data Generation Parameters", 
+  "target_dataset_size": 1000,
+  "use_real_images": true,
+  "batch_size": 1,
+  "max_synthetic_per_real": 5,
+  "augmentation_seed": 42,
+  
+  "_quality_section": "Quality Control Parameters",
+  "min_depth_quality": 0.3,
+  "enable_quality_monitoring": true,
+  "quality_threshold": 0.5,
+  "max_failed_attempts": 3,
+  
+  "_optimization_section": "Performance Optimization",
+  "enable_caching": true,
+  "parallel_processing": false,
+  "checkpoint_interval": 100,
+  
+  "_error_handling_section": "Error Handling Configuration",
+  "continue_on_error": true,
+  "max_errors": 10,
+  "retry_attempts": 2,
+  
+  "_examples": {
+    "small_test_run": {
+      "target_dataset_size": 10,
+      "use_real_images": false,
+      "enable_quality_monitoring": false
+    },
+    "production_run": {
+      "target_dataset_size": 5000,
+      "use_real_images": true,
+      "batch_size": 4,
+      "quality_threshold": 0.7,
+      "checkpoint_interval": 50
+    },
+    "high_quality_run": {
+      "min_depth_quality": 0.5,
+      "quality_threshold": 0.8,
+      "max_failed_attempts": 1,
+      "continue_on_error": false
+    }
+  }
+}

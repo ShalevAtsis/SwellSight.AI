@@ -1,0 +1,17 @@
+{
+  "real_data_path": "data/real",
+  "synthetic_data_path": "data/synthetic",
+  "metadata_path": "data/metadata",
+  "output_path": "data/pipeline_output",
+  "midas_model": "Intel/dpt-large",
+  "controlnet_model": "lllyasviel/sd-controlnet-depth",
+  "target_dataset_size": 10,
+  "use_real_images": false,
+  "batch_size": 1,
+  "min_depth_quality": 0.3,
+  "enable_quality_monitoring": true,
+  "quality_threshold": 0.5,
+  "continue_on_error": true,
+  "max_errors": 5,
+  "augmentation_seed": 42
+}

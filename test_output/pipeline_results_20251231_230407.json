@@ -1,0 +1,211 @@
+{
+  "pipeline_metadata": {
+    "execution_id": "pipeline_20251231_230407",
+    "config": {
+      "real_data_path": "data/real",
+      "synthetic_data_path": "data/synthetic",
+      "metadata_path": "data/metadata",
+      "output_path": "test_output",
+      "midas_model": "Intel/dpt-large",
+      "midas_device": null,
+      "min_depth_quality": 0.3,
+      "controlnet_model": "lllyasviel/sd-controlnet-depth",
+      "batch_size": 1,
+      "max_synthetic_per_real": 5,
+      "target_dataset_size": 3,
+      "use_real_images": false,
+      "augmentation_seed": 42,
+      "enable_quality_monitoring": true,
+      "quality_threshold": 0.5,
+      "max_failed_attempts": 3,
+      "enable_caching": true,
+      "parallel_processing": false,
+      "checkpoint_interval": 100,
+      "continue_on_error": true,
+      "max_errors": 10,
+      "retry_attempts": 2,
+      "_comment": "SwellSight End-to-End Pipeline Configuration Example",
+      "_description": "This configuration file demonstrates all available options for the pipeline",
+      "_models_section": "Model Configuration",
+      "_generation_section": "Data Generation Parameters",
+      "_quality_section": "Quality Control Parameters",
+      "_optimization_section": "Performance Optimization",
+      "_error_handling_section": "Error Handling Configuration",
+      "_examples": {
+        "small_test_run": {
+          "target_dataset_size": 10,
+          "use_real_images": false,
+          "enable_quality_monitoring": false
+        },
+        "production_run": {
+          "target_dataset_size": 5000,
+          "use_real_images": true,
+          "batch_size": 4,
+          "quality_threshold": 0.7,
+          "checkpoint_interval": 50
+        },
+        "high_quality_run": {
+          "min_depth_quality": 0.5,
+          "quality_threshold": 0.8,
+          "max_failed_attempts": 1,
+          "continue_on_error": false
+        }
+      }
+    },
+    "start_time": "2025-12-31T23:04:06.343098",
+    "end_time": null,
+    "total_samples_generated": 3,
+    "pipeline_version": "1.0"
+  },
+  "synthetic_dataset": {
+    "sample_count": 3,
+    "output_path": "data/synthetic",
+    "metadata_path": "data/metadata",
+    "samples": [
+      {
+        "sample_id": 0,
+        "image_path": "data\\synthetic\\sample_000000.jpg",
+        "image_filename": "sample_000000.jpg",
+        "height_meters": 2.6658791542941698,
+        "wave_type": "A_FRAME",
+        "direction": "BOTH",
+        "data_source": "synthetic",
+        "generation_params": {
+          "period_seconds": 9.925205228583835,
+          "wavelength_meters": 83.48161072232341,
+          "depth_meters": 7.891769713312099
+        },
+        "image_size": [
+          768,
+          768
+        ],
+        "created_timestamp": "2025-12-31T23:04:06.410224"
+      },
+      {
+        "sample_id": 1,
+        "image_path": "data\\synthetic\\sample_000001.jpg",
+        "image_filename": "sample_000001.jpg",
+        "height_meters": 2.803788103464772,
+        "wave_type": "A_FRAME",
+        "direction": "BOTH",
+        "data_source": "synthetic",
+        "generation_params": {
+          "period_seconds": 10.953452737796892,
+          "wavelength_meters": 54.46958291571055,
+          "depth_meters": 3.749103798428827
+        },
+        "image_size": [
+          768,
+          768
+        ],
+        "created_timestamp": "2025-12-31T23:04:06.438634"
+      },
+      {
+        "sample_id": 2,
+        "image_path": "data\\synthetic\\sample_000002.jpg",
+        "image_filename": "sample_000002.jpg",
+        "height_meters": 2.169814565982441,
+        "wave_type": "A_FRAME",
+        "direction": "BOTH",
+        "data_source": "synthetic",
+        "generation_params": {
+          "period_seconds": 9.39186355480654,
+          "wavelength_meters": 147.48266566692848,
+          "depth_meters": 6.359531844825733
+        },
+        "image_size": [
+          768,
+          768
+        ],
+        "created_timestamp": "2025-12-31T23:04:06.463680"
+      }
+    ]
+  },
+  "progress_summary": {
+    "total_steps": 21,
+    "completed_steps": 11,
+    "completion_rate": 0.5238095238095238,
+    "total_time_seconds": 1.5299627780914307,
+    "average_time_per_step": 0.13908752528103915,
+    "error_count": 0,
+    "errors": []
+  },
+  "pipeline_state": {
+    "initialized": true,
+    "start_time": "2025-12-31T23:04:06.343098",
+    "end_time": null,
+    "total_processed": 0,
+    "successful_samples": 0,
+    "failed_samples": 0,
+    "checkpoints": []
+  },
+  "quality_analysis": {
+    "metrics": {
+      "timestamp": "2025-12-31T23:04:06.468524",
+      "dataset_name": "pipeline_synthetic_dataset",
+      "total_samples": 3,
+      "height_distribution": {
+        "0.3-0.8m": 0.0,
+        "0.8-1.4m": 0.0,
+        "1.4-1.9m": 0.0,
+        "1.9-2.4m": 1.0,
+        "2.4-2.9m": 2.0,
+        "2.9-3.5m": 0.0,
+        "3.5-4.0m": 0.0
+      },
+      "wave_type_distribution": {
+        "A_FRAME": 3
+      },
+      "direction_distribution": {
+        "BOTH": 3
+      },
+      "data_source_distribution": {
+        "synthetic": 3
+      },
+      "overall_quality_score": 0.41431426139206934,
+      "diversity_score": 0.035635653480173286,
+      "balance_score": 1.0,
+      "height_statistics": {
+        "min": 2.169814565982441,
+        "max": 2.803788103464772,
+        "mean": 2.5464939412471277,
+        "std": 0.2722379270389302,
+        "median": 2.6658791542941698,
+        "q25": 2.4178468601383054,
+        "q75": 2.734833628879471
+      },
+      "augmentation_coverage": {
+        "samples_with_augmentation": 0,
+        "parameter_coverage": {},
+        "parameter_ranges": {}
+      },
+      "drift_score": null,
+      "drift_detected": false,
+      "drift_details": null
+    },
+    "validation": {
+      "total_samples": 3,
+      "valid_samples": 3,
+      "invalid_samples": 0,
+      "quality_issues": [],
+      "filtering_recommendations": [],
+      "quality_distribution": {
+        "high_quality": 3,
+        "medium_quality": 0,
+        "low_quality": 0
+      }
+    },
+    "drift": {
+      "drift_detected": false,
+      "drift_score": 0.0,
+      "drift_threshold": 0.1,
+      "affected_features": [],
+      "statistical_tests": {},
+      "recommendations": [
+        "Insufficient samples for reliable drift detection"
+      ]
+    },
+    "dashboard_path": "test_output\\quality_reports\\quality_dashboard_pipeline_synthetic_dataset_20251231_230406.png",
+    "report_path": "test_output\\quality_reports\\quality_report_pipeline_synthetic_dataset_20251231_230407.json"
+  }
+}

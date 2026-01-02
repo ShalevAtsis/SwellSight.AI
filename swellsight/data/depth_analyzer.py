@@ -1,40 +1,42 @@
-"""Depth-based wave analysis from MiDaS depth maps."""
+"""Depth-based wave analysis for MiDaS extracted depth maps."""
 
 import numpy as np
 import cv2
-from typing import Dict, List, Tuple, Optional, Any
+import logging
+from typing import Dict, Any, List, Tuple, Optional
 from scipy import ndimage, signal
 from scipy.spatial.distance import cdist
 from sklearn.cluster import DBSCAN
-import logging
+import matplotlib.pyplot as plt
 from dataclasses import dataclass
-from pathlib import Path
 
+# Set up logging
 logger = logging.getLogger(__name__)
 
 
 @dataclass
-class WaveDetectionResult:
-    """Result of wave detection from depth map."""
-    wave_crests: List[Tuple[int, int]]  # (x, y) coordinates of wave crests
-    wave_heights: List[float]  # Heights in meters for each detected wave
-    dominant_direction: str  # 'left', 'right', 'both'
-    breaking_regions: np.ndarray  # Binary mask of breaking wave regions
-    wave_type: str  # Estimated wave type
-    confidence_score: float  # Overall confidence in detection
+class WaveAnalysisResult:
+    """Result of depth-based wave analysis."""
+    estimated_height: float
+    height_confidence: float
+    breaking_patterns: Dict[str, float]
+    wave_direction: str
+    direction_confidence: float
+    depth_features: np.ndarray
+    analysis_metadata: Dict[str, Any]
 
 
-class DepthWaveAnalyzer:
+class DepthAnalyzer:
     """
-    Analyzes wave parameters from MiDaS depth maps.
+    Analyzes MiDaS-extracted depth maps to estimate wave parameters.
     
-    Implements depth-based wave height estimation, breaking detection,
-    and wave direction analysis for beach scenes.
+    Provides alternative wave parameter estimation method for validation
+    and comparison with the main deep learning model.
     """
     
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """
-        Initialize the depth wave analyzer.
+        Initialize depth analyzer.
         
         Args:
             config: Optional configuration dictionary
@@ -43,403 +45,681 @@ class DepthWaveAnalyzer:
         
         # Analysis parameters
         self.min_wave_height = self.config.get('min_wave_height', 0.1)  # meters
-        self.max_wave_height = self.config.get('max_wave_height', 5.0)  # meters
-        self.depth_scale_factor = self.config.get('depth_scale_factor', 0.1)
-        self.breaking_gradient_threshold = self.config.get('breaking_gradient_threshold', 0.15)
-        self.wave_detection_sensitivity = self.config.get('wave_detection_sensitivity', 0.8)
+        self.max_wave_height = self.config.get('max_wave_height', 10.0)  # meters
+        self.crest_detection_threshold = self.config.get('crest_detection_threshold', 0.1)
+        self.smoothing_kernel_size = self.config.get('smoothing_kernel_size', 5)
+        self.gradient_threshold = self.config.get('gradient_threshold', 0.05)
         
-        logger.info("Initialized DepthWaveAnalyzer")
+        logger.info("Depth analyzer initialized")
     
-    def analyze_waves_from_depth(self, depth_map: np.ndarray, 
-                                image_filename: Optional[str] = None) -> WaveDetectionResult:
+    def analyze_wave_parameters(self, depth_map: np.ndarray) -> WaveAnalysisResult:
         """
-        Analyze wave parameters from a depth map.
+        Analyze wave parameters from depth map.
         
         Args:
             depth_map: Input depth map from MiDaS
-            image_filename: Optional filename for logging
-            
+        
         Returns:
-            WaveDetectionResult with detected wave parameters
+            WaveAnalysisResult with estimated parameters
         """
         try:
-            # Preprocess depth map
+            # Validate and preprocess depth map
             processed_depth = self._preprocess_depth_map(depth_map)
             
-            # Detect wave crests
-            wave_crests = self._detect_wave_crests(processed_depth)
+            # Estimate wave height
+            height, height_confidence = self.estimate_wave_height(processed_depth)
             
-            # Estimate wave heights
-            wave_heights = self._estimate_wave_heights(processed_depth, wave_crests)
+            # Detect breaking patterns
+            breaking_patterns = self.detect_breaking_patterns(processed_depth)
             
             # Analyze wave direction
-            dominant_direction = self._analyze_wave_direction(processed_depth, wave_crests)
+            direction, direction_confidence = self.analyze_wave_direction(processed_depth)
             
-            # Detect breaking regions
-            breaking_regions = self._detect_breaking_regions(processed_depth)
+            # Generate depth features
+            depth_features = self.generate_depth_features(processed_depth)
             
-            # Classify wave type
-            wave_type = self._classify_wave_type(processed_depth, wave_crests, breaking_regions)
+            # Create analysis metadata
+            analysis_metadata = {
+                'depth_map_shape': depth_map.shape,
+                'depth_range': (float(depth_map.min()), float(depth_map.max())),
+                'processing_parameters': {
+                    'smoothing_kernel_size': self.smoothing_kernel_size,
+                    'gradient_threshold': self.gradient_threshold,
+                    'crest_detection_threshold': self.crest_detection_threshold
+                },
+                'quality_indicators': self._assess_depth_quality(processed_depth)
+            }
             
-            # Compute confidence score
-            confidence_score = self._compute_confidence_score(
-                processed_depth, wave_crests, wave_heights, breaking_regions
+            result = WaveAnalysisResult(
+                estimated_height=height,
+                height_confidence=height_confidence,
+                breaking_patterns=breaking_patterns,
+                wave_direction=direction,
+                direction_confidence=direction_confidence,
+                depth_features=depth_features,
+                analysis_metadata=analysis_metadata
             )
             
-            result = WaveDetectionResult(
-                wave_crests=wave_crests,
-                wave_heights=wave_heights,
-                dominant_direction=dominant_direction,
-                breaking_regions=breaking_regions,
-                wave_type=wave_type,
-                confidence_score=confidence_score
-            )
-            
-            logger.info(f"Analyzed waves for {image_filename or 'unknown'}: "
-                       f"{len(wave_crests)} crests, avg height {np.mean(wave_heights):.2f}m")
+            logger.debug(f"Wave analysis complete: height={height:.2f}m, direction={direction}")
             
             return result
             
         except Exception as e:
-            logger.error(f"Error analyzing waves from depth map: {e}")
-            # Return empty result
-            return WaveDetectionResult(
-                wave_crests=[],
-                wave_heights=[],
-                dominant_direction='both',
-                breaking_regions=np.zeros_like(depth_map, dtype=bool),
-                wave_type='unknown',
-                confidence_score=0.0
+            logger.error(f"Failed to analyze wave parameters: {e}")
+            raise
+    
+    def estimate_wave_height(self, depth_map: np.ndarray) -> Tuple[float, float]:
+        """
+        Estimate wave height from depth map using crest detection.
+        
+        Args:
+            depth_map: Preprocessed depth map
+        
+        Returns:
+            Tuple of (height, confidence)
+        """
+        try:
+            # Extract wave crests
+            crests = self.extract_wave_crests(depth_map)
+            
+            if len(crests) == 0:
+                logger.warning("No wave crests detected")
+                return 0.0, 0.0
+            
+            # Calculate height statistics from crests
+            crest_heights = []
+            for crest in crests:
+                # Get depth values along crest
+                crest_depths = depth_map[crest[:, 0], crest[:, 1]]
+                
+                # Find local minima (troughs) around crest
+                trough_depth = self._find_nearby_trough(depth_map, crest)
+                
+                # Calculate wave height as difference
+                if trough_depth is not None:
+                    wave_height = trough_depth - np.min(crest_depths)
+                    if self.min_wave_height <= wave_height <= self.max_wave_height:
+                        crest_heights.append(wave_height)
+            
+            if not crest_heights:
+                logger.warning("No valid wave heights calculated")
+                return 0.0, 0.0
+            
+            # Calculate statistics
+            estimated_height = np.median(crest_heights)  # Use median for robustness
+            height_std = np.std(crest_heights)
+            
+            # Calculate confidence based on consistency
+            confidence = self._calculate_height_confidence(crest_heights, estimated_height)
+            
+            logger.debug(f"Estimated wave height: {estimated_height:.2f}m ± {height_std:.2f}m")
+            
+            return float(estimated_height), float(confidence)
+            
+        except Exception as e:
+            logger.error(f"Failed to estimate wave height: {e}")
+            return 0.0, 0.0
+    
+    def detect_breaking_patterns(self, depth_map: np.ndarray) -> Dict[str, float]:
+        """
+        Detect wave breaking patterns from depth map gradients and discontinuities.
+        
+        Args:
+            depth_map: Preprocessed depth map
+        
+        Returns:
+            Dictionary with breaking pattern scores
+        """
+        try:
+            # Calculate gradients
+            grad_x = np.gradient(depth_map, axis=1)
+            grad_y = np.gradient(depth_map, axis=0)
+            gradient_magnitude = np.sqrt(grad_x**2 + grad_y**2)
+            
+            # Calculate second derivatives (curvature)
+            grad_xx = np.gradient(grad_x, axis=1)
+            grad_yy = np.gradient(grad_y, axis=0)
+            curvature = np.abs(grad_xx) + np.abs(grad_yy)
+            
+            # Detect discontinuities
+            discontinuities = self._detect_depth_discontinuities(depth_map)
+            
+            # Analyze breaking patterns
+            breaking_patterns = {}
+            
+            # Spilling breakers: gradual depth changes with moderate gradients
+            spilling_score = self._analyze_spilling_pattern(gradient_magnitude, curvature)
+            breaking_patterns['spilling'] = spilling_score
+            
+            # Plunging breakers: sharp depth changes with high gradients
+            plunging_score = self._analyze_plunging_pattern(gradient_magnitude, discontinuities)
+            breaking_patterns['plunging'] = plunging_score
+            
+            # Collapsing breakers: irregular patterns with high curvature
+            collapsing_score = self._analyze_collapsing_pattern(curvature, discontinuities)
+            breaking_patterns['collapsing'] = collapsing_score
+            
+            # Surging breakers: minimal breaking with low gradients
+            surging_score = self._analyze_surging_pattern(gradient_magnitude, depth_map)
+            breaking_patterns['surging'] = surging_score
+            
+            # Normalize scores
+            total_score = sum(breaking_patterns.values())
+            if total_score > 0:
+                breaking_patterns = {k: v / total_score for k, v in breaking_patterns.items()}
+            
+            logger.debug(f"Breaking patterns: {breaking_patterns}")
+            
+            return breaking_patterns
+            
+        except Exception as e:
+            logger.error(f"Failed to detect breaking patterns: {e}")
+            return {'spilling': 0.25, 'plunging': 0.25, 'collapsing': 0.25, 'surging': 0.25}
+    
+    def analyze_wave_direction(self, depth_map: np.ndarray) -> Tuple[str, float]:
+        """
+        Determine wave direction from depth map flow analysis.
+        
+        Args:
+            depth_map: Preprocessed depth map
+        
+        Returns:
+            Tuple of (direction, confidence)
+        """
+        try:
+            # Calculate optical flow on depth map
+            flow_vectors = self._calculate_depth_flow(depth_map)
+            
+            if flow_vectors is None or len(flow_vectors) == 0:
+                return 'BOTH', 0.0
+            
+            # Analyze flow directions
+            angles = np.arctan2(flow_vectors[:, 1], flow_vectors[:, 0])
+            angles_deg = np.degrees(angles)
+            
+            # Normalize angles to 0-360 range
+            angles_deg = (angles_deg + 360) % 360
+            
+            # Analyze directional consistency
+            direction, confidence = self._classify_wave_direction(angles_deg)
+            
+            logger.debug(f"Wave direction: {direction} (confidence: {confidence:.3f})")
+            
+            return direction, confidence
+            
+        except Exception as e:
+            logger.error(f"Failed to analyze wave direction: {e}")
+            return 'BOTH', 0.0
+    
+    def generate_depth_features(self, depth_map: np.ndarray) -> np.ndarray:
+        """
+        Generate feature vector from depth map for analysis.
+        
+        Args:
+            depth_map: Preprocessed depth map
+        
+        Returns:
+            Feature vector
+        """
+        try:
+            features = []
+            
+            # Basic statistics
+            features.extend([
+                np.mean(depth_map),
+                np.std(depth_map),
+                np.min(depth_map),
+                np.max(depth_map),
+                np.median(depth_map)
+            ])
+            
+            # Gradient statistics
+            grad_x = np.gradient(depth_map, axis=1)
+            grad_y = np.gradient(depth_map, axis=0)
+            gradient_magnitude = np.sqrt(grad_x**2 + grad_y**2)
+            
+            features.extend([
+                np.mean(gradient_magnitude),
+                np.std(gradient_magnitude),
+                np.max(gradient_magnitude)
+            ])
+            
+            # Texture features
+            features.extend(self._calculate_texture_features(depth_map))
+            
+            # Spatial frequency features
+            features.extend(self._calculate_frequency_features(depth_map))
+            
+            # Morphological features
+            features.extend(self._calculate_morphological_features(depth_map))
+            
+            return np.array(features, dtype=np.float32)
+            
+        except Exception as e:
+            logger.error(f"Failed to generate depth features: {e}")
+            return np.zeros(20, dtype=np.float32)  # Return default feature vector
+    
+    def validate_depth_quality(self, depth_map: np.ndarray) -> float:
+        """
+        Validate depth map quality for beach scene analysis.
+        
+        Args:
+            depth_map: Input depth map to validate
+        
+        Returns:
+            Quality score between 0.0 and 1.0
+        """
+        try:
+            quality_indicators = self._assess_depth_quality(depth_map)
+            
+            # Weighted combination of quality indicators
+            weights = {
+                'variation_score': 0.3,
+                'gradient_consistency': 0.2,
+                'spatial_coherence': 0.3,
+                'range_utilization': 0.2
+            }
+            
+            overall_quality = sum(
+                weights.get(key, 0) * value 
+                for key, value in quality_indicators.items()
             )
+            
+            return float(np.clip(overall_quality, 0.0, 1.0))
+            
+        except Exception as e:
+            logger.error(f"Failed to validate depth quality: {e}")
+            return 0.0
+    
+    def extract_wave_crests(self, depth_map: np.ndarray) -> List[np.ndarray]:
+        """
+        Extract wave crest lines from depth map.
+        
+        Args:
+            depth_map: Input depth map
+        
+        Returns:
+            List of crest line coordinates
+        """
+        try:
+            # Smooth depth map to reduce noise
+            smoothed = cv2.GaussianBlur(depth_map, (self.smoothing_kernel_size, self.smoothing_kernel_size), 1.0)
+            
+            # Find local maxima (shallow areas indicating crests)
+            local_maxima = self._find_local_maxima(smoothed)
+            
+            # Connect nearby maxima into crest lines
+            crests = self._connect_crest_points(local_maxima, smoothed)
+            
+            # Filter crests by length and consistency
+            filtered_crests = self._filter_crests(crests, smoothed)
+            
+            logger.debug(f"Extracted {len(filtered_crests)} wave crests")
+            
+            return filtered_crests
+            
+        except Exception as e:
+            logger.error(f"Failed to extract wave crests: {e}")
+            return []
     
     def _preprocess_depth_map(self, depth_map: np.ndarray) -> np.ndarray:
-        """
-        Preprocess depth map for wave analysis.
+        """Preprocess depth map for analysis."""
+        # Handle invalid values
+        processed = np.copy(depth_map)
+        processed[np.isnan(processed)] = np.nanmean(processed)
+        processed[np.isinf(processed)] = np.nanmean(processed)
         
-        Args:
-            depth_map: Raw depth map
-            
-        Returns:
-            Processed depth map
-        """
-        # Normalize depth values
-        depth_normalized = (depth_map - np.min(depth_map)) / (np.max(depth_map) - np.min(depth_map))
+        # Apply median filter to reduce noise
+        processed = ndimage.median_filter(processed, size=3)
         
-        # Apply Gaussian smoothing to reduce noise
-        depth_smooth = ndimage.gaussian_filter(depth_normalized, sigma=2.0)
-        
-        # Focus on water region (bottom 70% of image)
-        water_mask = np.zeros_like(depth_smooth)
-        water_start = int(0.3 * depth_smooth.shape[0])
-        water_mask[water_start:, :] = 1.0
-        
-        # Apply water mask
-        depth_processed = depth_smooth * water_mask
-        
-        return depth_processed
+        return processed
     
-    def _detect_wave_crests(self, depth_map: np.ndarray) -> List[Tuple[int, int]]:
-        """
-        Detect wave crests from depth map using local maxima detection.
-        
-        Args:
-            depth_map: Processed depth map
+    def _find_nearby_trough(self, depth_map: np.ndarray, crest: np.ndarray) -> Optional[float]:
+        """Find nearby trough depth for wave height calculation."""
+        try:
+            # Get crest center
+            crest_center = np.mean(crest, axis=0).astype(int)
             
-        Returns:
-            List of (x, y) coordinates of wave crests
-        """
-        # Compute horizontal gradients to find wave patterns
-        grad_x = np.gradient(depth_map, axis=1)
-        grad_y = np.gradient(depth_map, axis=0)
-        
-        # Find local maxima in depth (wave crests)
-        local_maxima = ndimage.maximum_filter(depth_map, size=10) == depth_map
-        
-        # Filter by minimum depth threshold (avoid detecting noise)
-        depth_threshold = np.percentile(depth_map[depth_map > 0], 70)
-        valid_maxima = local_maxima & (depth_map > depth_threshold)
-        
-        # Get coordinates of wave crests
-        crest_coords = np.where(valid_maxima)
-        wave_crests = list(zip(crest_coords[1], crest_coords[0]))  # (x, y) format
-        
-        # Cluster nearby crests to avoid duplicates
-        if len(wave_crests) > 1:
-            wave_crests = self._cluster_wave_crests(wave_crests)
-        
-        return wave_crests
+            # Search in expanding circles around crest
+            max_radius = min(depth_map.shape) // 4
+            
+            for radius in range(5, max_radius, 5):
+                # Create circular mask
+                y, x = np.ogrid[:depth_map.shape[0], :depth_map.shape[1]]
+                mask = (x - crest_center[1])**2 + (y - crest_center[0])**2 <= radius**2
+                
+                if np.any(mask):
+                    # Find minimum depth in this region
+                    masked_depths = depth_map[mask]
+                    trough_depth = np.max(masked_depths)  # Max depth (deepest water)
+                    
+                    # Check if this is significantly deeper than crest
+                    crest_depth = np.min(depth_map[crest[:, 0], crest[:, 1]])
+                    if trough_depth - crest_depth > self.min_wave_height:
+                        return trough_depth
+            
+            return None
+            
+        except Exception as e:
+            logger.warning(f"Failed to find nearby trough: {e}")
+            return None
     
-    def _cluster_wave_crests(self, wave_crests: List[Tuple[int, int]], 
-                           min_distance: int = 20) -> List[Tuple[int, int]]:
-        """
-        Cluster nearby wave crests to avoid duplicates.
+    def _calculate_height_confidence(self, heights: List[float], estimated_height: float) -> float:
+        """Calculate confidence score for height estimation."""
+        if not heights or len(heights) < 2:
+            return 0.0
         
-        Args:
-            wave_crests: List of crest coordinates
-            min_distance: Minimum distance between crests
-            
-        Returns:
-            Filtered list of wave crests
-        """
-        if len(wave_crests) <= 1:
-            return wave_crests
+        # Coefficient of variation (lower is better)
+        cv = np.std(heights) / (np.mean(heights) + 1e-6)
+        cv_score = np.exp(-cv * 2)  # Exponential decay
         
-        # Convert to numpy array for clustering
-        crests_array = np.array(wave_crests)
+        # Number of measurements (more is better)
+        count_score = min(len(heights) / 10.0, 1.0)
         
-        # Use DBSCAN clustering
-        clustering = DBSCAN(eps=min_distance, min_samples=1)
-        cluster_labels = clustering.fit_predict(crests_array)
+        # Range check (heights should be reasonable)
+        range_score = 1.0 if self.min_wave_height <= estimated_height <= self.max_wave_height else 0.5
         
-        # Take centroid of each cluster
-        clustered_crests = []
-        for cluster_id in np.unique(cluster_labels):
-            if cluster_id == -1:  # Noise points
-                continue
-            
-            cluster_points = crests_array[cluster_labels == cluster_id]
-            centroid = np.mean(cluster_points, axis=0).astype(int)
-            clustered_crests.append((centroid[0], centroid[1]))
+        # Combined confidence
+        confidence = (cv_score + count_score + range_score) / 3
         
-        return clustered_crests
+        return float(np.clip(confidence, 0.0, 1.0))
     
-    def _estimate_wave_heights(self, depth_map: np.ndarray, 
-                              wave_crests: List[Tuple[int, int]]) -> List[float]:
-        """
-        Estimate wave heights from depth variations around crests.
+    def _detect_depth_discontinuities(self, depth_map: np.ndarray) -> np.ndarray:
+        """Detect sharp depth discontinuities."""
+        # Use Laplacian to detect discontinuities
+        laplacian = cv2.Laplacian(depth_map, cv2.CV_64F)
         
-        Args:
-            depth_map: Processed depth map
-            wave_crests: List of wave crest coordinates
-            
-        Returns:
-            List of estimated wave heights in meters
-        """
-        wave_heights = []
+        # Threshold to find significant discontinuities
+        threshold = np.std(laplacian) * 2
+        discontinuities = np.abs(laplacian) > threshold
         
-        for crest_x, crest_y in wave_crests:
-            try:
-                # Define analysis window around crest
-                window_size = 30
-                y_start = max(0, crest_y - window_size)
-                y_end = min(depth_map.shape[0], crest_y + window_size)
-                x_start = max(0, crest_x - window_size)
-                x_end = min(depth_map.shape[1], crest_x + window_size)
-                
-                # Extract local depth region
-                local_depth = depth_map[y_start:y_end, x_start:x_end]
-                
-                if local_depth.size == 0:
-                    wave_heights.append(0.0)
-                    continue
-                
-                # Estimate height from depth variation
-                crest_depth = depth_map[crest_y, crest_x]
-                trough_depth = np.min(local_depth[local_depth > 0])
-                
-                # Convert depth difference to wave height
-                depth_diff = crest_depth - trough_depth
-                estimated_height = depth_diff * self.depth_scale_factor
-                
-                # Clamp to reasonable range
-                estimated_height = np.clip(estimated_height, self.min_wave_height, self.max_wave_height)
-                wave_heights.append(float(estimated_height))
-                
-            except Exception as e:
-                logger.warning(f"Error estimating height for crest at ({crest_x}, {crest_y}): {e}")
-                wave_heights.append(0.0)
-        
-        return wave_heights
+        return discontinuities.astype(np.float32)
     
-    def _analyze_wave_direction(self, depth_map: np.ndarray, 
-                               wave_crests: List[Tuple[int, int]]) -> str:
-        """
-        Analyze dominant wave direction from depth flow patterns.
+    def _analyze_spilling_pattern(self, gradient_magnitude: np.ndarray, curvature: np.ndarray) -> float:
+        """Analyze spilling breaker pattern."""
+        # Spilling: moderate gradients, low curvature
+        moderate_gradient = (gradient_magnitude > np.percentile(gradient_magnitude, 30)) & \
+                           (gradient_magnitude < np.percentile(gradient_magnitude, 70))
+        low_curvature = curvature < np.percentile(curvature, 50)
         
-        Args:
-            depth_map: Processed depth map
-            wave_crests: List of wave crest coordinates
+        spilling_regions = moderate_gradient & low_curvature
+        return float(np.mean(spilling_regions))
+    
+    def _analyze_plunging_pattern(self, gradient_magnitude: np.ndarray, discontinuities: np.ndarray) -> float:
+        """Analyze plunging breaker pattern."""
+        # Plunging: high gradients with discontinuities
+        high_gradient = gradient_magnitude > np.percentile(gradient_magnitude, 80)
+        high_discontinuity = discontinuities > 0.5
+        
+        plunging_regions = high_gradient & high_discontinuity
+        return float(np.mean(plunging_regions))
+    
+    def _analyze_collapsing_pattern(self, curvature: np.ndarray, discontinuities: np.ndarray) -> float:
+        """Analyze collapsing breaker pattern."""
+        # Collapsing: high curvature with some discontinuities
+        high_curvature = curvature > np.percentile(curvature, 75)
+        some_discontinuity = discontinuities > 0.3
+        
+        collapsing_regions = high_curvature & some_discontinuity
+        return float(np.mean(collapsing_regions))
+    
+    def _analyze_surging_pattern(self, gradient_magnitude: np.ndarray, depth_map: np.ndarray) -> float:
+        """Analyze surging breaker pattern."""
+        # Surging: low gradients, minimal breaking
+        low_gradient = gradient_magnitude < np.percentile(gradient_magnitude, 40)
+        
+        # Check for smooth depth transitions
+        smoothness = 1.0 - np.std(gradient_magnitude) / (np.mean(gradient_magnitude) + 1e-6)
+        
+        surging_score = np.mean(low_gradient) * smoothness
+        return float(np.clip(surging_score, 0.0, 1.0))
+    
+    def _calculate_depth_flow(self, depth_map: np.ndarray) -> Optional[np.ndarray]:
+        """Calculate optical flow on depth map."""
+        try:
+            # Convert to uint8 for optical flow
+            depth_uint8 = ((depth_map - depth_map.min()) / 
+                          (depth_map.max() - depth_map.min()) * 255).astype(np.uint8)
             
-        Returns:
-            Dominant direction: 'left', 'right', or 'both'
-        """
-        if len(wave_crests) == 0:
-            return 'both'
-        
-        # Compute horizontal gradients
-        grad_x = np.gradient(depth_map, axis=1)
-        
-        # Analyze flow direction around wave crests
-        left_flow_strength = 0.0
-        right_flow_strength = 0.0
-        
-        for crest_x, crest_y in wave_crests:
-            # Sample gradient in region around crest
-            window_size = 20
-            y_start = max(0, crest_y - window_size)
-            y_end = min(depth_map.shape[0], crest_y + window_size)
-            x_start = max(0, crest_x - window_size)
-            x_end = min(depth_map.shape[1], crest_x + window_size)
+            # Create shifted versions for flow calculation
+            shifted_x = np.roll(depth_uint8, 1, axis=1)
+            shifted_y = np.roll(depth_uint8, 1, axis=0)
             
-            local_grad_x = grad_x[y_start:y_end, x_start:x_end]
+            # Calculate flow using Lucas-Kanade method
+            flow = cv2.calcOpticalFlowPyrLK(
+                depth_uint8, shifted_x, 
+                None, None,
+                winSize=(15, 15),
+                maxLevel=2
+            )
             
-            # Accumulate flow strengths
-            left_flow_strength += np.sum(local_grad_x[local_grad_x < 0])
-            right_flow_strength += np.sum(local_grad_x[local_grad_x > 0])
+            if flow[0] is not None:
+                # Extract valid flow vectors
+                good_points = flow[1].ravel() == 1
+                if np.any(good_points):
+                    flow_vectors = flow[0][good_points] - np.arange(len(flow[0]))[good_points, np.newaxis]
+                    return flow_vectors
+            
+            return None
+            
+        except Exception as e:
+            logger.warning(f"Failed to calculate depth flow: {e}")
+            return None
+    
+    def _classify_wave_direction(self, angles_deg: np.ndarray) -> Tuple[str, float]:
+        """Classify wave direction from flow angles."""
+        if len(angles_deg) == 0:
+            return 'BOTH', 0.0
         
-        # Determine dominant direction
-        left_magnitude = abs(left_flow_strength)
-        right_magnitude = abs(right_flow_strength)
+        # Analyze angle distribution
+        # Convert to unit vectors for circular statistics
+        unit_vectors = np.column_stack([np.cos(np.radians(angles_deg)), 
+                                       np.sin(np.radians(angles_deg))])
         
-        if left_magnitude > right_magnitude * 1.5:
-            return 'left'
-        elif right_magnitude > left_magnitude * 1.5:
-            return 'right'
+        # Calculate mean direction
+        mean_vector = np.mean(unit_vectors, axis=0)
+        mean_angle = np.degrees(np.arctan2(mean_vector[1], mean_vector[0]))
+        mean_angle = (mean_angle + 360) % 360
+        
+        # Calculate directional consistency
+        consistency = np.linalg.norm(mean_vector)
+        
+        # Classify direction based on mean angle
+        if consistency < 0.3:
+            return 'BOTH', consistency
+        elif 315 <= mean_angle or mean_angle < 45:
+            return 'RIGHT', consistency
+        elif 135 <= mean_angle < 225:
+            return 'LEFT', consistency
         else:
-            return 'both'
+            return 'BOTH', consistency * 0.5  # Reduce confidence for ambiguous directions
     
-    def _detect_breaking_regions(self, depth_map: np.ndarray) -> np.ndarray:
-        """
-        Detect breaking wave regions from depth gradients.
+    def _calculate_texture_features(self, depth_map: np.ndarray) -> List[float]:
+        """Calculate texture features from depth map."""
+        # Gray-Level Co-occurrence Matrix (GLCM) features
+        # Simplified implementation
         
-        Args:
-            depth_map: Processed depth map
-            
-        Returns:
-            Binary mask of breaking regions
-        """
-        # Compute gradient magnitude
+        # Normalize depth map to 0-255 range
+        normalized = ((depth_map - depth_map.min()) / 
+                     (depth_map.max() - depth_map.min()) * 255).astype(np.uint8)
+        
+        # Calculate local binary patterns
+        lbp = self._calculate_lbp(normalized)
+        
+        # Texture statistics
+        features = [
+            np.std(lbp),  # LBP variance
+            np.mean(np.abs(np.diff(normalized, axis=0))),  # Vertical roughness
+            np.mean(np.abs(np.diff(normalized, axis=1))),  # Horizontal roughness
+        ]
+        
+        return features
+    
+    def _calculate_lbp(self, image: np.ndarray) -> np.ndarray:
+        """Calculate Local Binary Pattern."""
+        # Simplified LBP calculation
+        h, w = image.shape
+        lbp = np.zeros_like(image)
+        
+        for i in range(1, h-1):
+            for j in range(1, w-1):
+                center = image[i, j]
+                code = 0
+                
+                # 8-neighborhood
+                neighbors = [
+                    image[i-1, j-1], image[i-1, j], image[i-1, j+1],
+                    image[i, j+1], image[i+1, j+1], image[i+1, j],
+                    image[i+1, j-1], image[i, j-1]
+                ]
+                
+                for k, neighbor in enumerate(neighbors):
+                    if neighbor >= center:
+                        code |= (1 << k)
+                
+                lbp[i, j] = code
+        
+        return lbp
+    
+    def _calculate_frequency_features(self, depth_map: np.ndarray) -> List[float]:
+        """Calculate frequency domain features."""
+        # FFT-based features
+        fft = np.fft.fft2(depth_map)
+        fft_magnitude = np.abs(fft)
+        
+        # Frequency statistics
+        features = [
+            np.mean(fft_magnitude),
+            np.std(fft_magnitude),
+            np.sum(fft_magnitude > np.percentile(fft_magnitude, 90))  # High frequency content
+        ]
+        
+        return features
+    
+    def _calculate_morphological_features(self, depth_map: np.ndarray) -> List[float]:
+        """Calculate morphological features."""
+        # Morphological operations
+        kernel = np.ones((5, 5), np.uint8)
+        
+        # Convert to uint8 for morphological operations
+        depth_uint8 = ((depth_map - depth_map.min()) / 
+                      (depth_map.max() - depth_map.min()) * 255).astype(np.uint8)
+        
+        opening = cv2.morphologyEx(depth_uint8, cv2.MORPH_OPEN, kernel)
+        closing = cv2.morphologyEx(depth_uint8, cv2.MORPH_CLOSE, kernel)
+        
+        features = [
+            np.mean(np.abs(depth_uint8 - opening)),  # Opening difference
+            np.mean(np.abs(depth_uint8 - closing)),  # Closing difference
+        ]
+        
+        return features
+    
+    def _assess_depth_quality(self, depth_map: np.ndarray) -> Dict[str, float]:
+        """Assess depth map quality indicators."""
+        # Variation score
+        depth_std = np.std(depth_map)
+        depth_mean = np.mean(depth_map)
+        variation_score = min(depth_std / (depth_mean + 1e-6), 1.0)
+        
+        # Gradient consistency
         grad_x = np.gradient(depth_map, axis=1)
         grad_y = np.gradient(depth_map, axis=0)
         gradient_magnitude = np.sqrt(grad_x**2 + grad_y**2)
+        gradient_consistency = 1.0 - min(np.std(gradient_magnitude) / (np.mean(gradient_magnitude) + 1e-6), 1.0)
         
-        # Threshold for breaking detection
-        breaking_threshold = np.percentile(gradient_magnitude, 85)
-        breaking_regions = gradient_magnitude > breaking_threshold
+        # Spatial coherence
+        kernel = np.ones((3, 3)) / 9
+        smoothed = cv2.filter2D(depth_map, -1, kernel)
+        coherence_error = np.mean(np.abs(depth_map - smoothed))
+        depth_range = depth_map.max() - depth_map.min()
+        spatial_coherence = 1.0 - min(coherence_error / (depth_range + 1e-6), 1.0)
         
-        # Apply morphological operations to clean up regions
-        kernel = np.ones((5, 5), np.uint8)
-        breaking_regions = cv2.morphologyEx(
-            breaking_regions.astype(np.uint8), 
-            cv2.MORPH_CLOSE, 
-            kernel
-        ).astype(bool)
+        # Range utilization
+        depth_normalized = (depth_map - depth_map.min()) / (depth_range + 1e-6)
+        hist, _ = np.histogram(depth_normalized, bins=50)
+        hist_normalized = hist / (hist.sum() + 1e-6)
+        entropy = -np.sum(hist_normalized * np.log(hist_normalized + 1e-10))
+        range_utilization = min(entropy / np.log(50), 1.0)
         
-        return breaking_regions
-    
-    def _classify_wave_type(self, depth_map: np.ndarray, 
-                           wave_crests: List[Tuple[int, int]], 
-                           breaking_regions: np.ndarray) -> str:
-        """
-        Classify wave type based on depth patterns and breaking behavior.
-        
-        Args:
-            depth_map: Processed depth map
-            wave_crests: List of wave crest coordinates
-            breaking_regions: Binary mask of breaking regions
-            
-        Returns:
-            Wave type classification
-        """
-        if len(wave_crests) == 0:
-            return 'flat'
-        
-        # Analyze breaking intensity
-        breaking_intensity = np.sum(breaking_regions) / breaking_regions.size
-        
-        # Analyze wave organization
-        if len(wave_crests) >= 3:
-            # Check if crests are organized in lines (beach break pattern)
-            crest_coords = np.array(wave_crests)
-            y_coords = crest_coords[:, 1]
-            y_std = np.std(y_coords)
-            
-            if y_std < 20:  # Crests are aligned horizontally
-                if breaking_intensity > 0.15:
-                    return 'beach_break'
-                else:
-                    return 'point_break'
-            else:
-                return 'a_frame'
-        else:
-            # Few crests - analyze individual characteristics
-            if breaking_intensity > 0.2:
-                return 'closeout'
-            else:
-                return 'beach_break'
-    
-    def _compute_confidence_score(self, depth_map: np.ndarray, 
-                                 wave_crests: List[Tuple[int, int]], 
-                                 wave_heights: List[float], 
-                                 breaking_regions: np.ndarray) -> float:
-        """
-        Compute confidence score for wave detection results.
-        
-        Args:
-            depth_map: Processed depth map
-            wave_crests: List of wave crest coordinates
-            wave_heights: List of estimated wave heights
-            breaking_regions: Binary mask of breaking regions
-            
-        Returns:
-            Confidence score between 0 and 1
-        """
-        confidence_factors = []
-        
-        # Factor 1: Depth map quality
-        depth_range = np.max(depth_map) - np.min(depth_map)
-        if depth_range > 0.1:
-            depth_quality = min(depth_range / 0.5, 1.0)
-        else:
-            depth_quality = 0.0
-        confidence_factors.append(depth_quality)
-        
-        # Factor 2: Number of detected crests
-        crest_factor = min(len(wave_crests) / 5.0, 1.0)
-        confidence_factors.append(crest_factor)
-        
-        # Factor 3: Wave height consistency
-        if wave_heights:
-            height_std = np.std(wave_heights)
-            height_mean = np.mean(wave_heights)
-            if height_mean > 0:
-                height_consistency = 1.0 - min(height_std / height_mean, 1.0)
-            else:
-                height_consistency = 0.0
-        else:
-            height_consistency = 0.0
-        confidence_factors.append(height_consistency)
-        
-        # Factor 4: Breaking region coherence
-        breaking_intensity = np.sum(breaking_regions) / breaking_regions.size
-        breaking_factor = 1.0 if 0.05 <= breaking_intensity <= 0.3 else 0.5
-        confidence_factors.append(breaking_factor)
-        
-        # Compute overall confidence
-        overall_confidence = np.mean(confidence_factors)
-        return float(overall_confidence)
-    
-    def extract_wave_parameters(self, detection_result: WaveDetectionResult) -> Dict[str, Any]:
-        """
-        Extract structured wave parameters from detection result.
-        
-        Args:
-            detection_result: Result from wave detection
-            
-        Returns:
-            Dictionary with structured wave parameters
-        """
-        parameters = {
-            'wave_count': len(detection_result.wave_crests),
-            'average_height_meters': float(np.mean(detection_result.wave_heights)) if detection_result.wave_heights else 0.0,
-            'max_height_meters': float(np.max(detection_result.wave_heights)) if detection_result.wave_heights else 0.0,
-            'min_height_meters': float(np.min(detection_result.wave_heights)) if detection_result.wave_heights else 0.0,
-            'height_std_meters': float(np.std(detection_result.wave_heights)) if detection_result.wave_heights else 0.0,
-            'dominant_direction': detection_result.dominant_direction,
-            'wave_type': detection_result.wave_type,
-            'breaking_intensity': float(np.sum(detection_result.breaking_regions) / detection_result.breaking_regions.size),
-            'confidence_score': detection_result.confidence_score,
-            'crest_coordinates': [(int(x), int(y)) for x, y in detection_result.wave_crests]  # Convert to int
+        return {
+            'variation_score': float(variation_score),
+            'gradient_consistency': float(gradient_consistency),
+            'spatial_coherence': float(spatial_coherence),
+            'range_utilization': float(range_utilization)
         }
+    
+    def _find_local_maxima(self, depth_map: np.ndarray) -> np.ndarray:
+        """Find local maxima in depth map."""
+        # Use morphological operations to find local maxima
+        kernel = np.ones((5, 5))
+        dilated = ndimage.maximum_filter(depth_map, footprint=kernel)
         
-        return parameters
+        # Local maxima are points where original equals dilated
+        local_maxima = (depth_map == dilated) & (depth_map > np.percentile(depth_map, 70))
+        
+        # Get coordinates
+        coords = np.column_stack(np.where(local_maxima))
+        
+        return coords
+    
+    def _connect_crest_points(self, maxima_coords: np.ndarray, depth_map: np.ndarray) -> List[np.ndarray]:
+        """Connect nearby maxima points into crest lines."""
+        if len(maxima_coords) < 2:
+            return []
+        
+        # Use DBSCAN clustering to group nearby points
+        clustering = DBSCAN(eps=10, min_samples=3)
+        labels = clustering.fit_predict(maxima_coords)
+        
+        crests = []
+        for label in set(labels):
+            if label == -1:  # Noise points
+                continue
+            
+            cluster_points = maxima_coords[labels == label]
+            if len(cluster_points) >= 3:  # Minimum points for a crest
+                # Sort points to form a line
+                sorted_points = self._sort_points_into_line(cluster_points)
+                crests.append(sorted_points)
+        
+        return crests
+    
+    def _sort_points_into_line(self, points: np.ndarray) -> np.ndarray:
+        """Sort points to form a continuous line."""
+        if len(points) <= 2:
+            return points
+        
+        # Start with leftmost point
+        sorted_points = [points[np.argmin(points[:, 1])]]
+        remaining_points = list(points)
+        remaining_points.remove(sorted_points[0])
+        
+        # Greedily add nearest points
+        while remaining_points:
+            current_point = sorted_points[-1]
+            distances = [np.linalg.norm(current_point - p) for p in remaining_points]
+            nearest_idx = np.argmin(distances)
+            
+            sorted_points.append(remaining_points[nearest_idx])
+            remaining_points.pop(nearest_idx)
+        
+        return np.array(sorted_points)
+    
+    def _filter_crests(self, crests: List[np.ndarray], depth_map: np.ndarray) -> List[np.ndarray]:
+        """Filter crests by length and consistency."""
+        filtered_crests = []
+        
+        for crest in crests:
+            # Check minimum length
+            if len(crest) < 5:
+                continue
+            
+            # Check depth consistency along crest
+            crest_depths = depth_map[crest[:, 0], crest[:, 1]]
+            depth_variation = np.std(crest_depths) / (np.mean(crest_depths) + 1e-6)
+            
+            if depth_variation < 0.5:  # Reasonable consistency
+                filtered_crests.append(crest)
+        
+        return filtered_crests
