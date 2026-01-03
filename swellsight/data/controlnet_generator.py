@@ -382,31 +382,82 @@ class ControlNetSyntheticGenerator:
     augmentation parameter control.
     """
     
-    def __init__(self, controlnet_model: str = "lllyasviel/sd-controlnet-depth", 
-                 batch_size: int = 1, device: Optional[str] = None):
+    def __init__(self, config: Dict[str, Any]):
         """
         Initialize ControlNet synthetic generator.
         
         Args:
-            controlnet_model: HuggingFace ControlNet model name
-            batch_size: Batch size for generation
-            device: Device to run on ('cuda', 'cpu', or None for auto-detect)
+            config: Configuration dictionary with ControlNet settings
         """
-        self.controlnet_model = controlnet_model
-        self.batch_size = batch_size
+        self.controlnet_model = config.get('controlnet_model_name', "lllyasviel/sd-controlnet-depth")
+        self.batch_size = config.get('batch_size', 1)
+        self.guidance_scale = config.get('guidance_scale', 7.5)
+        self.num_inference_steps = config.get('num_inference_steps', 20)
+        self.controlnet_conditioning_scale = config.get('controlnet_conditioning_scale', 1.0)
         
         # Auto-detect device if not specified
+        device = config.get('device')
         if device is None:
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
         else:
             self.device = device
         
-        # Initialize components (placeholder for actual ControlNet implementation)
-        self.use_controlnet = False  # Set to True when actual ControlNet is available
+        # Try to initialize proper ControlNet
+        self.controlnet_pipeline = None
+        self.use_controlnet = False
         
-        logger.info(f"ControlNet generator initialized (model: {controlnet_model}, device: {self.device})")
-        if not self.use_controlnet:
-            logger.warning("ControlNet not available, using fallback synthetic generation")
+        # Check if diffusers is available
+        try:
+            from diffusers import StableDiffusionControlNetPipeline, ControlNetModel
+            self._initialize_controlnet()
+        except ImportError:
+            logger.warning("Diffusers not available. Install with: pip install diffusers transformers accelerate")
+            logger.info("Using enhanced fallback generation")
+        
+        logger.info(f"ControlNet generator initialized (model: {self.controlnet_model}, device: {self.device})")
+        if self.use_controlnet:
+            logger.info("Using proper ControlNet pipeline for high-quality generation")
+        else:
+            logger.info("Using enhanced fallback generation with improved beach realism")
+    
+    def _initialize_controlnet(self):
+        """Initialize proper ControlNet pipeline."""
+        try:
+            from diffusers import StableDiffusionControlNetPipeline, ControlNetModel
+            
+            logger.info("Loading ControlNet depth model...")
+            
+            # Load ControlNet model
+            controlnet = ControlNetModel.from_pretrained(
+                self.controlnet_model,
+                torch_dtype=torch.float16 if self.device == "cuda" else torch.float32
+            )
+            
+            # Load Stable Diffusion pipeline with ControlNet
+            self.controlnet_pipeline = StableDiffusionControlNetPipeline.from_pretrained(
+                "runwayml/stable-diffusion-v1-5",
+                controlnet=controlnet,
+                torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+                safety_checker=None,
+                requires_safety_checker=False
+            )
+            
+            if self.device == "cuda":
+                self.controlnet_pipeline = self.controlnet_pipeline.to("cuda")
+                # Enable memory efficient attention
+                try:
+                    self.controlnet_pipeline.enable_model_cpu_offload()
+                    self.controlnet_pipeline.enable_attention_slicing()
+                except:
+                    pass  # These optimizations are optional
+            
+            self.use_controlnet = True
+            logger.info("ControlNet pipeline loaded successfully")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize ControlNet: {e}")
+            self.controlnet_pipeline = None
+            self.use_controlnet = False
     
     def generate_synthetic_image(self, depth_map: np.ndarray, 
                                augmentation_params: AugmentationParameters,
@@ -425,28 +476,28 @@ class ControlNetSyntheticGenerator:
         try:
             if self.use_controlnet:
                 # Use actual ControlNet implementation
-                synthetic_image = self._generate_with_controlnet(
+                synthetic_image, generation_metadata = self._generate_with_controlnet(
                     depth_map, augmentation_params, prompt
                 )
             else:
-                # Use fallback synthetic generation
-                synthetic_image = self._generate_fallback_synthetic(
+                # Use enhanced fallback synthetic generation
+                synthetic_image, generation_metadata = self._generate_enhanced_fallback(
                     depth_map, augmentation_params
                 )
             
             # Calculate quality score
             quality_score = self._assess_generation_quality(synthetic_image, depth_map)
             
-            # Create generation metadata
-            generation_metadata = {
+            # Update generation metadata
+            generation_metadata.update({
                 'controlnet_model': self.controlnet_model,
                 'use_controlnet': self.use_controlnet,
                 'device': self.device,
-                'prompt': prompt or self._generate_prompt_from_params(augmentation_params),
+                'prompt': prompt or self._generate_detailed_prompt_from_params(augmentation_params),
                 'depth_map_shape': depth_map.shape,
                 'generation_timestamp': datetime.now().isoformat(),
-                'prompt_quality_score': quality_score
-            }
+                'quality_score': quality_score
+            })
             
             return SyntheticGenerationResult(
                 synthetic_image=synthetic_image,
@@ -462,19 +513,148 @@ class ControlNetSyntheticGenerator:
     
     def _generate_with_controlnet(self, depth_map: np.ndarray, 
                                 augmentation_params: AugmentationParameters,
-                                prompt: str) -> np.ndarray:
-        """Generate image using actual ControlNet (placeholder implementation)."""
-        # This would be the actual ControlNet implementation
-        # For now, return fallback generation
-        return self._generate_fallback_synthetic(depth_map, augmentation_params)
+                                prompt: Optional[str]) -> Tuple[np.ndarray, Dict[str, Any]]:
+        """Generate image using actual ControlNet with enhanced parameters for photorealism."""
+        try:
+            # Prepare depth map for ControlNet
+            depth_image = self._prepare_depth_for_controlnet(depth_map)
+            
+            # Generate detailed surfer's perspective prompt
+            if prompt is None:
+                prompt = self._generate_detailed_prompt_from_params(augmentation_params)
+            
+            # Create comprehensive negative prompt
+            negative_prompt = self._create_negative_prompt()
+            
+            logger.info(f"Generating surfer's perspective with ControlNet...")
+            logger.info(f"Prompt: {prompt[:150]}...")
+            
+            # Enhanced generation parameters for photorealism
+            enhanced_guidance_scale = 8.5  # Higher for better prompt following
+            enhanced_steps = 25  # More steps for better quality
+            controlnet_strength = 1.2  # Stronger depth conditioning
+            
+            # Generate image with ControlNet
+            result = self.controlnet_pipeline(
+                prompt=prompt,
+                negative_prompt=negative_prompt,
+                image=depth_image,
+                num_inference_steps=enhanced_steps,
+                guidance_scale=enhanced_guidance_scale,
+                controlnet_conditioning_scale=controlnet_strength,
+                generator=torch.Generator(device=self.device).manual_seed(42),
+                # Additional quality parameters
+                eta=0.0,  # Deterministic sampling for consistency
+                cross_attention_kwargs={"scale": 1.0}  # Full attention scale
+            )
+            
+            # Convert to numpy array
+            synthetic_image = np.array(result.images[0])
+            
+            # Post-process for enhanced realism
+            synthetic_image = self._post_process_for_realism(synthetic_image, augmentation_params)
+            
+            metadata = {
+                'method': 'enhanced_controlnet',
+                'prompt': prompt,
+                'negative_prompt': negative_prompt,
+                'guidance_scale': enhanced_guidance_scale,
+                'num_inference_steps': enhanced_steps,
+                'controlnet_conditioning_scale': controlnet_strength,
+                'perspective': 'surfer_viewpoint',
+                'quality_enhancements': [
+                    'enhanced_guidance_scale',
+                    'increased_inference_steps',
+                    'stronger_depth_conditioning',
+                    'comprehensive_negative_prompt',
+                    'post_processing_realism'
+                ]
+            }
+            
+            return synthetic_image, metadata
+            
+        except Exception as e:
+            logger.error(f"Enhanced ControlNet generation failed: {e}")
+            # Fallback to enhanced generation
+            return self._generate_enhanced_fallback(depth_map, augmentation_params)
     
-    def _generate_fallback_synthetic(self, depth_map: np.ndarray, 
-                                   augmentation_params: AugmentationParameters) -> np.ndarray:
-        """
-        Generate synthetic image using fallback method (enhanced depth-to-RGB conversion).
+    def _prepare_depth_for_controlnet(self, depth_map: np.ndarray) -> 'Image.Image':
+        """Prepare depth map for ControlNet input."""
+        # Normalize depth map to 0-255
+        depth_min = depth_map.min()
+        depth_max = depth_map.max()
         
-        This creates a more sophisticated synthetic image based on augmentation parameters
-        while maintaining the depth structure.
+        if depth_max - depth_min < 1e-6:
+            normalized_depth = np.full_like(depth_map, 128, dtype=np.uint8)
+        else:
+            normalized_depth = ((depth_map - depth_min) / (depth_max - depth_min) * 255).astype(np.uint8)
+        
+        # Convert to 3-channel image
+        depth_rgb = np.stack([normalized_depth] * 3, axis=-1)
+        
+        # Convert to PIL Image
+        depth_image = Image.fromarray(depth_rgb)
+        
+        # Resize to standard size if needed (ControlNet works best with 512x512)
+        if depth_image.size != (512, 512):
+            depth_image = depth_image.resize((512, 512), Image.LANCZOS)
+        
+        return depth_image
+    
+    def _create_negative_prompt(self) -> str:
+        """Create comprehensive negative prompt to avoid unwanted elements and ensure photorealism."""
+        return (
+            # Avoid non-photorealistic styles
+            "cartoon, anime, painting, drawing, sketch, illustration, "
+            "digital art, CGI, 3D render, artificial, fake, "
+            
+            # Avoid low quality
+            "low quality, blurry, distorted, unrealistic, pixelated, "
+            "grainy, noisy, compressed, artifacts, low resolution, "
+            "bad photography, amateur, overexposed, underexposed, "
+            
+            # Avoid unwanted objects and people
+            "people, humans, person, surfer in water, swimmer, "
+            "buildings, houses, cars, vehicles, boats, ships, "
+            "surfboards in frame, equipment, gear, "
+            
+            # Avoid text and watermarks
+            "text, watermark, logo, signature, copyright, "
+            "writing, letters, numbers, signs, "
+            
+            # Avoid bad wave characteristics
+            "bad anatomy, deformed waves, unnatural water, "
+            "impossible wave physics, floating objects, "
+            "weird water behavior, unrealistic foam, "
+            
+            # Avoid bad colors and lighting
+            "oversaturated, artificial colors, neon colors, "
+            "purple water, pink water, unnatural hues, "
+            "harsh shadows, blown out highlights, "
+            "flat lighting, indoor lighting, "
+            
+            # Avoid unwanted weather/conditions
+            "snow, ice, frozen water, desert, mountains in water, "
+            "swimming pool, bathtub, artificial water, "
+            
+            # Avoid composition issues
+            "cropped waves, cut off horizon, tilted horizon, "
+            "bad framing, cluttered composition, "
+            "multiple horizons, floating elements, "
+            
+            # Avoid technical issues
+            "motion blur, camera shake, out of focus background, "
+            "lens flare, chromatic aberration, vignetting, "
+            "fish eye distortion, wide angle distortion"
+        )
+    
+    def _generate_enhanced_fallback(self, depth_map: np.ndarray, 
+                                   augmentation_params: AugmentationParameters) -> Tuple[np.ndarray, Dict[str, Any]]:
+        """
+        Generate synthetic image using enhanced fallback method with improved beach realism.
+        
+        This creates a sophisticated synthetic image based on augmentation parameters
+        while maintaining the depth structure with much better quality than basic fallback.
         """
         height, width = depth_map.shape
         
@@ -487,37 +667,59 @@ class ControlNetSyntheticGenerator:
         else:
             normalized_depth = (depth_map - depth_min) / (depth_max - depth_min)
         
-        # Create base RGB channels
-        rgb_image = np.zeros((height, width, 3), dtype=np.uint8)
+        # Create base RGB channels with higher resolution processing
+        rgb_image = np.zeros((height, width, 3), dtype=np.float32)
         
-        # Sky region (top portion, lighter depths)
-        sky_mask = normalized_depth > 0.8
-        sky_color = self._get_sky_color(augmentation_params)
-        rgb_image[sky_mask] = sky_color
+        # Sky region (far/high depths) - more realistic sky
+        sky_mask = normalized_depth > 0.7
+        sky_color = self._get_realistic_sky_color(augmentation_params)
+        rgb_image[sky_mask] = sky_color.astype(np.float32)
         
-        # Water region (middle depths)
-        water_mask = (normalized_depth >= 0.2) & (normalized_depth <= 0.8)
-        water_color = self._get_water_color(augmentation_params, normalized_depth[water_mask])
-        rgb_image[water_mask] = water_color
+        # Water region with realistic wave patterns
+        water_mask = (normalized_depth >= 0.3) & (normalized_depth <= 0.7)
+        if np.any(water_mask):
+            water_colors = self._generate_realistic_water(
+                normalized_depth, 
+                augmentation_params,
+                water_mask
+            )
+            rgb_image[water_mask] = water_colors
         
-        # Beach/shore region (shallow depths)
-        beach_mask = normalized_depth < 0.2
-        beach_color = self._get_beach_color(augmentation_params)
-        rgb_image[beach_mask] = beach_color
+        # Beach/shore region (close/low depths) - realistic sand
+        beach_mask = normalized_depth < 0.3
+        beach_color = self._get_realistic_beach_color(augmentation_params)
+        rgb_image[beach_mask] = beach_color.astype(np.float32)
         
-        # Apply wave effects
-        rgb_image = self._apply_wave_effects(rgb_image, normalized_depth, augmentation_params)
+        # Add sophisticated wave foam and breaking patterns
+        rgb_image = self._add_realistic_wave_foam(rgb_image, normalized_depth, augmentation_params)
         
-        # Apply lighting effects
-        rgb_image = self._apply_lighting_effects(rgb_image, augmentation_params)
+        # Add depth-based lighting effects
+        rgb_image = self._apply_depth_based_lighting(rgb_image, normalized_depth, augmentation_params)
         
-        # Apply atmospheric effects
-        rgb_image = self._apply_atmospheric_effects(rgb_image, augmentation_params)
+        # Add realistic water surface effects
+        rgb_image = self._add_water_surface_effects(rgb_image, normalized_depth, augmentation_params)
         
-        # Apply optical artifacts
-        rgb_image = self._apply_optical_artifacts(rgb_image, augmentation_params)
+        # Apply atmospheric perspective
+        rgb_image = self._apply_atmospheric_perspective(rgb_image, normalized_depth, augmentation_params)
         
-        return rgb_image
+        # Add realistic texture and noise
+        rgb_image = self._add_realistic_texture(rgb_image, augmentation_params)
+        
+        # Convert to uint8
+        rgb_image = np.clip(rgb_image, 0, 255).astype(np.uint8)
+        
+        metadata = {
+            'method': 'enhanced_fallback',
+            'quality_enhancements': [
+                'realistic_sky_colors',
+                'wave_pattern_generation',
+                'depth_based_lighting',
+                'atmospheric_perspective',
+                'surface_texture_simulation'
+            ]
+        }
+        
+        return rgb_image, metadata
     
     def _get_sky_color(self, params: AugmentationParameters) -> np.ndarray:
         """Generate sky color based on weather and lighting conditions."""
@@ -698,71 +900,618 @@ class ControlNetSyntheticGenerator:
         
         return rgb_image
     
-    def _generate_prompt_from_params(self, params: AugmentationParameters) -> str:
-        """Generate text prompt from augmentation parameters."""
-        prompt_parts = ["beach camera view"]
+    def _generate_detailed_prompt_from_params(self, params: AugmentationParameters) -> str:
+        """Generate detailed surfer's perspective prompt (optimized for 77 token limit)."""
         
-        # Add wave description
-        if params.dominant_wave_height_m > 2.0:
-            prompt_parts.append("large waves")
-        elif params.dominant_wave_height_m > 1.0:
-            prompt_parts.append("medium waves")
+        # Core surfer's perspective (essential elements)
+        prompt_parts = [
+            "photorealistic surfer's perspective",
+            "ocean waves from beach",
+            "surf check viewpoint",
+            "crystal clear water",
+            "professional surf photography"
+        ]
+        
+        # Wave characteristics (prioritized)
+        wave_height = params.dominant_wave_height_m
+        if wave_height < 1.0:
+            prompt_parts.append("small clean waves")
+        elif wave_height < 2.0:
+            prompt_parts.append("perfect surfable waves")
+        elif wave_height < 3.0:
+            prompt_parts.append("large powerful waves")
         else:
-            prompt_parts.append("small waves")
+            prompt_parts.append("massive waves")
         
-        # Add breaking type
-        if params.breaking_type == "plunging":
-            prompt_parts.append("plunging waves")
-        elif params.breaking_type == "spilling":
-            prompt_parts.append("spilling waves")
+        # Breaking type (key for wave analysis)
+        breaking_type = params.breaking_type
+        if breaking_type == "spilling":
+            prompt_parts.append("spilling white foam")
+        elif breaking_type == "plunging":
+            prompt_parts.append("barreling waves")
+        elif breaking_type == "collapsing":
+            prompt_parts.append("explosive white water")
+        elif breaking_type == "surging":
+            prompt_parts.append("shore break waves")
         
-        # Add weather conditions
-        if params.sky_clarity == "stormy":
-            prompt_parts.append("stormy weather")
-        elif params.sky_clarity == "overcast":
+        # Foam coverage (important visual element)
+        if params.foam_coverage_pct > 50:
+            prompt_parts.append("abundant white foam")
+        elif params.foam_coverage_pct > 20:
+            prompt_parts.append("clean wave crests")
+        else:
+            prompt_parts.append("glassy wave faces")
+        
+        # Lighting (affects image quality significantly)
+        sun_elevation = params.sun_elevation_deg
+        if sun_elevation > 60:
+            prompt_parts.append("bright sunny day")
+        elif sun_elevation > 30:
+            prompt_parts.append("good natural lighting")
+        else:
+            prompt_parts.append("golden hour light")
+        
+        # Weather (affects overall scene)
+        if params.rain_present:
+            prompt_parts.append("stormy conditions")
+        elif params.cloud_coverage_pct > 70:
             prompt_parts.append("overcast sky")
-        elif params.sky_clarity == "clear":
-            prompt_parts.append("clear sky")
+        else:
+            prompt_parts.append("clear blue sky")
         
-        # Add time of day based on sun elevation
-        if params.sun_elevation_deg < 20:
-            prompt_parts.append("golden hour lighting")
-        elif params.sun_elevation_deg > 70:
-            prompt_parts.append("bright daylight")
+        # Camera perspective
+        if params.camera_height_m > 20:
+            prompt_parts.append("elevated viewpoint")
+        else:
+            prompt_parts.append("beach level view")
         
-        return ", ".join(prompt_parts)
+        # Quality enhancers (essential for realism)
+        prompt_parts.extend([
+            "high resolution",
+            "sharp focus",
+            "natural colors",
+            "detailed wave structure"
+        ])
+        
+        # Join and ensure we stay under token limit
+        full_prompt = ", ".join(prompt_parts)
+        
+        # Rough token estimation (average 1.3 tokens per word)
+        estimated_tokens = len(full_prompt.split()) * 1.3
+        
+        if estimated_tokens > 75:  # Leave some margin
+            # Trim to essential elements
+            essential_parts = [
+                "photorealistic surfer's perspective",
+                "ocean waves from beach",
+                "surf check viewpoint",
+                prompt_parts[5],  # Wave size
+                prompt_parts[6],  # Breaking type
+                prompt_parts[7],  # Foam
+                prompt_parts[8],  # Lighting
+                "high resolution",
+                "sharp focus",
+                "natural colors"
+            ]
+            full_prompt = ", ".join(essential_parts)
+        
+        return full_prompt
+    
+    def _get_realistic_sky_color(self, params: AugmentationParameters) -> np.ndarray:
+        """Generate realistic sky colors based on weather and lighting conditions."""
+        base_sky = np.array([135, 206, 235], dtype=np.float32)  # Sky blue
+        
+        # Adjust for weather conditions
+        if params.rain_present:
+            base_sky = np.array([100, 100, 120], dtype=np.float32)  # Dark gray
+        elif params.cloud_coverage_pct > 70:
+            base_sky = np.array([180, 180, 190], dtype=np.float32)  # Light gray
+        elif params.sun_elevation_deg < 20:
+            # Golden hour colors
+            base_sky = np.array([255, 165, 100], dtype=np.float32)
+        elif params.sun_elevation_deg < 40:
+            # Warm daylight
+            base_sky = np.array([200, 220, 255], dtype=np.float32)
+        
+        # Adjust for sun elevation (brightness)
+        sun_factor = params.sun_elevation_deg / 90.0
+        brightness_factor = 0.5 + 0.5 * sun_factor
+        base_sky *= brightness_factor
+        
+        # Add atmospheric haze effect
+        if params.haze_density > 0.1:
+            haze_color = np.array([200, 200, 200], dtype=np.float32)
+            base_sky = base_sky * (1 - params.haze_density * 0.3) + haze_color * params.haze_density * 0.3
+        
+        return np.clip(base_sky, 0, 255)
+    
+    def _generate_realistic_water(self, normalized_depth: np.ndarray, 
+                                params: AugmentationParameters, 
+                                water_mask: np.ndarray) -> np.ndarray:
+        """Generate realistic water colors with wave patterns."""
+        height, width = normalized_depth.shape
+        
+        # Get water region coordinates
+        y_coords, x_coords = np.where(water_mask)
+        
+        if len(y_coords) == 0:
+            return np.array([])
+        
+        # Base water color (deep ocean blue)
+        base_water = np.array([64, 164, 223], dtype=np.float32)
+        
+        # Adjust base color for lighting conditions
+        sun_factor = params.sun_elevation_deg / 90.0
+        base_water *= (0.3 + 0.7 * sun_factor)  # Darker water in low light
+        
+        # Create wave patterns based on wave parameters
+        wave_amplitude = params.dominant_wave_height_m * 20
+        wave_frequency = 2 * np.pi / params.wavelength_m * 100  # Scale for pixel space
+        
+        # Generate wave pattern
+        wave_pattern = np.sin(y_coords * wave_frequency) * wave_amplitude
+        
+        # Add directional spread
+        if params.directional_spread_deg > 0:
+            angle_variation = np.sin(x_coords * wave_frequency * 0.5) * params.directional_spread_deg / 45.0
+            wave_pattern += angle_variation * wave_amplitude * 0.3
+        
+        # Create color variations based on wave pattern
+        colors = np.tile(base_water, (len(y_coords), 1))
+        
+        # Wave crests are lighter (sun reflection)
+        crest_mask = wave_pattern > wave_amplitude * 0.3
+        colors[crest_mask] += 40  # Brighter
+        
+        # Wave troughs are darker
+        trough_mask = wave_pattern < -wave_amplitude * 0.3
+        colors[trough_mask] -= 30  # Darker
+        
+        # Add surface roughness effects
+        if params.surface_roughness > 0.3:
+            roughness_noise = np.random.normal(0, params.surface_roughness * 20, len(y_coords))
+            colors += roughness_noise[:, np.newaxis]
+        
+        # Add specular highlights
+        if params.specular_highlight_intensity > 0.5:
+            # Simulate sun reflection on water
+            sun_reflection_prob = params.specular_highlight_intensity * 0.1
+            reflection_mask = np.random.random(len(y_coords)) < sun_reflection_prob
+            colors[reflection_mask] = [200, 220, 255]  # Bright reflection
+        
+        return np.clip(colors, 0, 255).astype(np.float32)
+    
+    def _get_realistic_beach_color(self, params: AugmentationParameters) -> np.ndarray:
+        """Generate realistic beach/sand colors."""
+        # Base sand color
+        base_sand = np.array([194, 178, 128], dtype=np.float32)
+        
+        # Adjust for wetness
+        if params.wet_sand_reflectivity > 0.5:
+            # Wet sand is darker and more reflective
+            base_sand *= (0.6 + 0.2 * (1 - params.wet_sand_reflectivity))
+        
+        # Adjust for lighting
+        sun_factor = params.sun_elevation_deg / 90.0
+        base_sand *= (0.4 + 0.6 * sun_factor)
+        
+        return np.clip(base_sand, 0, 255)
+    
+    def _add_realistic_wave_foam(self, rgb_image: np.ndarray, 
+                               normalized_depth: np.ndarray, 
+                               params: AugmentationParameters) -> np.ndarray:
+        """Add realistic wave foam patterns based on breaking behavior."""
+        if params.foam_coverage_pct < 5:
+            return rgb_image
+        
+        height, width = rgb_image.shape[:2]
+        
+        # Create foam mask based on depth gradients (wave breaking areas)
+        grad_y, grad_x = np.gradient(normalized_depth)
+        gradient_magnitude = np.sqrt(grad_x**2 + grad_y**2)
+        
+        # High gradient areas indicate breaking waves
+        foam_threshold = np.percentile(gradient_magnitude, 98 - params.foam_coverage_pct * 0.5)
+        foam_mask = gradient_magnitude > foam_threshold
+        
+        # Create realistic foam colors with variation
+        foam_base = np.array([255, 255, 255], dtype=np.float32)  # Pure white
+        foam_variation = np.array([240, 248, 255], dtype=np.float32)  # Slightly blue-white
+        
+        # Add foam with intensity variation based on breaker type
+        if params.breaking_type == "plunging":
+            # Intense white foam
+            rgb_image[foam_mask] = foam_base
+        elif params.breaking_type == "spilling":
+            # More gradual foam with variation
+            foam_intensity = np.random.uniform(0.7, 1.0, np.sum(foam_mask))
+            rgb_image[foam_mask] = foam_base * foam_intensity[:, np.newaxis]
+        else:
+            # Mixed foam patterns
+            rgb_image[foam_mask] = foam_variation
+        
+        # Add micro-foam density effects
+        if params.micro_foam_density > 0.3:
+            # Add small foam bubbles in water areas
+            water_mask = (normalized_depth >= 0.3) & (normalized_depth <= 0.7)
+            micro_foam_prob = params.micro_foam_density * 0.05
+            
+            y_water, x_water = np.where(water_mask)
+            if len(y_water) > 0:
+                micro_foam_mask = np.random.random(len(y_water)) < micro_foam_prob
+                if np.any(micro_foam_mask):
+                    foam_indices = (y_water[micro_foam_mask], x_water[micro_foam_mask])
+                    rgb_image[foam_indices] = rgb_image[foam_indices] * 0.7 + foam_variation * 0.3
+        
+        return rgb_image
+    
+    def _apply_depth_based_lighting(self, rgb_image: np.ndarray, 
+                                  normalized_depth: np.ndarray, 
+                                  params: AugmentationParameters) -> np.ndarray:
+        """Apply realistic lighting effects based on depth and sun position."""
+        
+        # Calculate lighting intensity based on sun elevation
+        base_intensity = 0.3 + 0.7 * (params.sun_elevation_deg / 90.0)
+        base_intensity *= params.light_intensity
+        
+        # Create depth-based lighting gradient
+        # Closer objects (lower depth values) are brighter
+        lighting_gradient = 0.7 + 0.3 * (1 - normalized_depth)
+        
+        # Apply sun azimuth effects (side lighting)
+        height, width = rgb_image.shape[:2]
+        x_coords = np.arange(width)
+        
+        # Convert sun azimuth to lighting direction
+        sun_direction = np.cos(np.radians(params.sun_azimuth_deg))
+        side_lighting = 0.9 + 0.1 * sun_direction * (x_coords / width - 0.5) * 2
+        
+        # Combine lighting effects
+        total_lighting = base_intensity * lighting_gradient * side_lighting[np.newaxis, :]
+        
+        # Apply lighting
+        rgb_image *= total_lighting[:, :, np.newaxis]
+        
+        # Add sun glare effects
+        if params.sun_glare_probability > 0.6:
+            # Create glare pattern
+            center_x = int(width * (0.3 + 0.4 * (params.sun_azimuth_deg / 360.0)))
+            center_y = int(height * (0.1 + 0.3 * (1 - params.sun_elevation_deg / 90.0)))
+            
+            y, x = np.ogrid[:height, :width]
+            distance = np.sqrt((x - center_x)**2 + (y - center_y)**2)
+            
+            glare_radius = min(width, height) * 0.2
+            glare_mask = distance < glare_radius
+            
+            if np.any(glare_mask):
+                glare_intensity = (1 - distance / glare_radius) * params.sun_glare_probability * 0.5
+                glare_intensity = np.clip(glare_intensity, 0, 1)
+                
+                # Apply glare (brighten affected areas)
+                rgb_image[glare_mask] += glare_intensity[glare_mask, np.newaxis] * 100
+        
+        return rgb_image
+    
+    def _add_water_surface_effects(self, rgb_image: np.ndarray, 
+                                 normalized_depth: np.ndarray, 
+                                 params: AugmentationParameters) -> np.ndarray:
+        """Add realistic water surface effects like ripples and wind streaks."""
+        
+        water_mask = (normalized_depth >= 0.3) & (normalized_depth <= 0.7)
+        
+        if not np.any(water_mask):
+            return rgb_image
+        
+        # Add wind streaks
+        if params.wind_streak_visibility > 0.3:
+            height, width = rgb_image.shape[:2]
+            
+            # Create wind streak pattern
+            streak_frequency = params.ripples_frequency_hz * 0.01
+            y_coords, x_coords = np.where(water_mask)
+            
+            if len(y_coords) > 0:
+                streak_pattern = np.sin(x_coords * streak_frequency) * params.wind_streak_visibility
+                
+                # Apply streaks as brightness variation
+                streak_effect = 1.0 + streak_pattern * 0.1
+                rgb_image[water_mask] *= streak_effect[:, np.newaxis]
+        
+        # Add surface ripples
+        if params.ripples_frequency_hz > 10:
+            y_coords, x_coords = np.where(water_mask)
+            
+            if len(y_coords) > 0:
+                ripple_freq = params.ripples_frequency_hz * 0.001
+                ripple_pattern = (np.sin(y_coords * ripple_freq) + 
+                                np.sin(x_coords * ripple_freq * 0.7)) * 0.5
+                
+                # Apply ripples as subtle color variation
+                ripple_effect = 1.0 + ripple_pattern * 0.05
+                rgb_image[water_mask] *= ripple_effect[:, np.newaxis]
+        
+        return rgb_image
+    
+    def _apply_atmospheric_perspective(self, rgb_image: np.ndarray, 
+                                     normalized_depth: np.ndarray, 
+                                     params: AugmentationParameters) -> np.ndarray:
+        """Apply atmospheric perspective effects (distant objects are hazier)."""
+        
+        # Distant objects (higher depth values) get more atmospheric haze
+        if params.haze_density > 0.1:
+            haze_color = np.array([200, 200, 200], dtype=np.float32)
+            
+            # Haze increases with distance
+            haze_factor = params.haze_density * normalized_depth * 0.4
+            
+            # Apply haze
+            rgb_image = (rgb_image * (1 - haze_factor[:, :, np.newaxis]) + 
+                        haze_color * haze_factor[:, :, np.newaxis])
+        
+        # Apply contrast attenuation with distance
+        if params.contrast_attenuation > 0.1:
+            mean_color = np.mean(rgb_image, axis=(0, 1))
+            
+            # Reduce contrast for distant objects
+            attenuation_factor = 1 - params.contrast_attenuation * normalized_depth * 0.3
+            
+            rgb_image = (mean_color + 
+                        (rgb_image - mean_color) * attenuation_factor[:, :, np.newaxis])
+        
+        return rgb_image
+    
+    def _add_realistic_texture(self, rgb_image: np.ndarray, 
+                             params: AugmentationParameters) -> np.ndarray:
+        """Add realistic texture and sensor effects."""
+        
+        # Add subtle sensor noise
+        if params.sensor_noise_level > 0:
+            noise_std = params.sensor_noise_level * 10  # Reduced noise for better quality
+            noise = np.random.normal(0, noise_std, rgb_image.shape).astype(np.float32)
+            rgb_image += noise
+        
+        # Add motion blur if specified
+        if params.motion_blur_kernel_size > 0:
+            kernel_size = int(params.motion_blur_kernel_size)
+            if kernel_size > 1:
+                # Apply subtle motion blur
+                kernel = np.ones((kernel_size, kernel_size), dtype=np.float32) / (kernel_size * kernel_size)
+                
+                # Convert to uint8 for cv2 processing
+                temp_image = np.clip(rgb_image, 0, 255).astype(np.uint8)
+                blurred = cv2.filter2D(temp_image, -1, kernel)
+                rgb_image = blurred.astype(np.float32)
+        
+        return rgb_image
+    
+    def _post_process_for_realism(self, synthetic_image: np.ndarray, 
+                                params: AugmentationParameters) -> np.ndarray:
+        """Post-process synthetic image for enhanced photorealism."""
+        try:
+            # Convert to float for processing
+            image = synthetic_image.astype(np.float32)
+            
+            # Enhance water clarity and depth
+            image = self._enhance_water_clarity(image, params)
+            
+            # Improve wave detail and texture
+            image = self._enhance_wave_details(image, params)
+            
+            # Adjust color balance for natural beach tones
+            image = self._adjust_natural_color_balance(image, params)
+            
+            # Add subtle film grain for photorealism
+            image = self._add_photographic_grain(image, params)
+            
+            # Final contrast and saturation adjustment
+            image = self._final_realism_adjustments(image, params)
+            
+            return np.clip(image, 0, 255).astype(np.uint8)
+            
+        except Exception as e:
+            logger.warning(f"Post-processing failed, returning original: {e}")
+            return synthetic_image
+    
+    def _enhance_water_clarity(self, image: np.ndarray, params: AugmentationParameters) -> np.ndarray:
+        """Enhance water clarity and transparency effects."""
+        height, width = image.shape[:2]
+        
+        # Create water mask (assume water is in blue-dominant areas)
+        blue_channel = image[:, :, 2]
+        green_channel = image[:, :, 1]
+        red_channel = image[:, :, 0]
+        
+        # Water areas where blue > red and blue > green
+        water_mask = (blue_channel > red_channel + 20) & (blue_channel > green_channel + 10)
+        
+        if np.any(water_mask):
+            # Enhance blue saturation in water areas
+            image[water_mask, 2] = np.clip(image[water_mask, 2] * 1.1, 0, 255)
+            
+            # Add subtle green tint for natural water color
+            image[water_mask, 1] = np.clip(image[water_mask, 1] * 1.05, 0, 255)
+            
+            # Reduce red slightly for cleaner water
+            image[water_mask, 0] = np.clip(image[water_mask, 0] * 0.95, 0, 255)
+        
+        return image
+    
+    def _enhance_wave_details(self, image: np.ndarray, params: AugmentationParameters) -> np.ndarray:
+        """Enhance wave structure and foam details."""
+        # Convert to grayscale for edge detection
+        gray = cv2.cvtColor(image.astype(np.uint8), cv2.COLOR_RGB2GRAY)
+        
+        # Detect wave edges
+        edges = cv2.Canny(gray, 30, 100)
+        
+        # Dilate edges slightly
+        kernel = np.ones((2, 2), np.uint8)
+        edges = cv2.dilate(edges, kernel, iterations=1)
+        
+        # Enhance contrast along wave edges
+        edge_mask = edges > 0
+        if np.any(edge_mask):
+            # Increase contrast at wave boundaries
+            for channel in range(3):
+                channel_data = image[:, :, channel]
+                mean_val = np.mean(channel_data[edge_mask])
+                
+                # Brighten above-average pixels, darken below-average
+                above_mean = channel_data[edge_mask] > mean_val
+                below_mean = channel_data[edge_mask] <= mean_val
+                
+                edge_pixels = channel_data[edge_mask]
+                edge_pixels[above_mean] = np.clip(edge_pixels[above_mean] * 1.1, 0, 255)
+                edge_pixels[below_mean] = np.clip(edge_pixels[below_mean] * 0.9, 0, 255)
+                
+                channel_data[edge_mask] = edge_pixels
+                image[:, :, channel] = channel_data
+        
+        return image
+    
+    def _adjust_natural_color_balance(self, image: np.ndarray, params: AugmentationParameters) -> np.ndarray:
+        """Adjust color balance for natural beach photography look."""
+        
+        # Warm up the image slightly for natural sunlight
+        if params.sun_elevation_deg > 30:
+            # Add warmth in highlights
+            highlights = image > 180
+            if np.any(highlights):
+                # Apply color adjustment per channel
+                image[:, :, 0][highlights[:, :, 0]] *= 1.02  # Red
+                image[:, :, 1][highlights[:, :, 1]] *= 1.01  # Green  
+                image[:, :, 2][highlights[:, :, 2]] *= 0.98  # Blue
+                image = np.clip(image, 0, 255)
+        
+        # Cool down shadows for natural contrast
+        shadows = image < 80
+        if np.any(shadows):
+            # Apply color adjustment per channel
+            image[:, :, 0][shadows[:, :, 0]] *= 0.98  # Red
+            image[:, :, 1][shadows[:, :, 1]] *= 0.99  # Green
+            image[:, :, 2][shadows[:, :, 2]] *= 1.02  # Blue
+            image = np.clip(image, 0, 255)
+        
+        # Enhance sky blues if present
+        sky_mask = (image[:, :, 2] > 150) & (image[:, :, 1] > 120) & (image[:, :, 0] < 140)
+        if np.any(sky_mask):
+            image[:, :, 2][sky_mask] = np.clip(image[:, :, 2][sky_mask] * 1.05, 0, 255)  # More blue
+            image[:, :, 0][sky_mask] = np.clip(image[:, :, 0][sky_mask] * 0.95, 0, 255)  # Less red
+        
+        return image
+    
+    def _add_photographic_grain(self, image: np.ndarray, params: AugmentationParameters) -> np.ndarray:
+        """Add subtle film grain for photographic realism."""
+        # Very subtle grain - much less than sensor noise
+        grain_strength = 0.5  # Very light grain
+        
+        # Generate grain pattern
+        grain = np.random.normal(0, grain_strength, image.shape).astype(np.float32)
+        
+        # Apply grain more to mid-tones, less to highlights and shadows
+        luminance = 0.299 * image[:, :, 0] + 0.587 * image[:, :, 1] + 0.114 * image[:, :, 2]
+        
+        # Create grain mask (stronger in mid-tones)
+        grain_mask = 1.0 - np.abs(luminance - 128) / 128.0
+        grain_mask = np.clip(grain_mask, 0.2, 1.0)  # Minimum grain level
+        
+        # Apply grain
+        for channel in range(3):
+            image[:, :, channel] += grain[:, :, channel] * grain_mask
+        
+        return image
+    
+    def _final_realism_adjustments(self, image: np.ndarray, params: AugmentationParameters) -> np.ndarray:
+        """Final adjustments for photorealism."""
+        
+        # Subtle contrast enhancement
+        image = np.clip((image - 128) * 1.05 + 128, 0, 255)
+        
+        # Slight saturation boost for vibrant but natural colors
+        # Convert to HSV for saturation adjustment
+        hsv = cv2.cvtColor(image.astype(np.uint8), cv2.COLOR_RGB2HSV).astype(np.float32)
+        
+        # Boost saturation slightly
+        hsv[:, :, 1] = np.clip(hsv[:, :, 1] * 1.1, 0, 255)
+        
+        # Convert back to RGB
+        image = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2RGB).astype(np.float32)
+        
+        return image
     
     def _assess_generation_quality(self, synthetic_image: np.ndarray, 
                                  depth_map: np.ndarray) -> float:
-        """Assess quality of generated synthetic image."""
+        """Assess quality of generated synthetic image with enhanced metrics."""
         try:
             # Check basic image properties
             if synthetic_image is None or synthetic_image.size == 0:
                 return 0.0
             
-            # Check for reasonable color variation
+            # Ensure image is in correct format
+            if len(synthetic_image.shape) != 3 or synthetic_image.shape[2] != 3:
+                return 0.2
+            
+            # Check for reasonable color variation (avoid uniform images)
             color_std = np.std(synthetic_image)
-            if color_std < 10:  # Too uniform
-                return 0.3
+            if color_std < 5:  # Too uniform
+                return 0.2
+            elif color_std < 15:
+                variation_score = 0.4
+            else:
+                variation_score = min(color_std / 40.0, 1.0)  # Normalize to 0-1
             
             # Check for proper depth correlation
             gray_image = cv2.cvtColor(synthetic_image, cv2.COLOR_RGB2GRAY)
+            
+            # Resize if shapes don't match
+            if gray_image.shape != depth_map.shape:
+                gray_image = cv2.resize(gray_image, (depth_map.shape[1], depth_map.shape[0]))
+            
             correlation = np.corrcoef(gray_image.flatten(), depth_map.flatten())[0, 1]
             
             if np.isnan(correlation):
                 correlation = 0.0
             
-            # Quality score based on variation and depth correlation
-            variation_score = min(color_std / 50.0, 1.0)  # Normalize to 0-1
             correlation_score = abs(correlation)  # Absolute correlation
             
-            overall_quality = (variation_score + correlation_score) / 2
+            # Check color distribution (realistic beach colors)
+            # Beach images should have blues (water), browns/yellows (sand), whites (foam)
+            mean_colors = np.mean(synthetic_image, axis=(0, 1))
+            
+            # Check for presence of expected color ranges
+            has_blue_water = mean_colors[2] > mean_colors[0] and mean_colors[2] > mean_colors[1]  # Blue channel dominant
+            has_varied_colors = np.std(mean_colors) > 10  # Color variation across channels
+            
+            color_realism_score = 0.5
+            if has_blue_water:
+                color_realism_score += 0.3
+            if has_varied_colors:
+                color_realism_score += 0.2
+            
+            # Check for edge preservation (important for wave structure)
+            edges_synthetic = cv2.Canny(gray_image, 50, 150)
+            edges_depth = cv2.Canny((depth_map * 255).astype(np.uint8), 50, 150)
+            
+            edge_correlation = np.corrcoef(edges_synthetic.flatten(), edges_depth.flatten())[0, 1]
+            if np.isnan(edge_correlation):
+                edge_correlation = 0.0
+            
+            edge_score = abs(edge_correlation)
+            
+            # Combine all quality metrics
+            overall_quality = (
+                variation_score * 0.25 +      # Color variation
+                correlation_score * 0.25 +    # Depth correlation
+                color_realism_score * 0.25 +  # Color realism
+                edge_score * 0.25             # Edge preservation
+            )
             
             return float(np.clip(overall_quality, 0.0, 1.0))
             
         except Exception as e:
             logger.warning(f"Failed to assess generation quality: {e}")
-            return 0.5  # Default moderate quality
+            return 0.4  # Default moderate quality for enhanced fallback
     
     def batch_generate(self, depth_maps: List[np.ndarray], 
                       param_sets: List[AugmentationParameters]) -> List[SyntheticGenerationResult]:

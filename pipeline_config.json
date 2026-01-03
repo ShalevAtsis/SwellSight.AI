@@ -6,7 +6,7 @@
   "midas_model": "Intel/dpt-large",
   "controlnet_model": "lllyasviel/sd-controlnet-depth",
   "target_dataset_size": 10,
-  "use_real_images": false,
+  "use_real_images": true,
   "batch_size": 1,
   "min_depth_quality": 0.3,
   "enable_quality_monitoring": true,
